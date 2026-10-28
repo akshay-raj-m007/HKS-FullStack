@@ -26,6 +26,7 @@ import { OrdersPage } from "./features/orders/OrdersPage";
 import { OrderDetailPage } from "./features/orders/OrderDetailPage";
 import { Empty } from "./components/ui";
 import "./styles.css";
+import { AskLoopPage } from "./features/assistant/AskLoopPage";
 const Router =
   import.meta.env.VITE_ROUTER_MODE === "hash" ? HashRouter : BrowserRouter;
 const client = new QueryClient({
@@ -61,6 +62,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/verify" element={<LoginPage />} />
           <Route element={<ProtectedRoute />}>
             <Route element={<AppLayout />}>
+              <Route path="/ask" element={<AskLoopPage />} />
               <Route path="/providers" element={<ProvidersPage />} />
               <Route path="/providers/:id" element={<BookingPage />} />
               <Route path="/addresses" element={<AddressesPage />} />

@@ -4,6 +4,8 @@
 
 [Live application](https://hks-fullstack.vercel.app) · [API health](https://hks-fullstack-api-m007.onrender.com/api/health) · [Functional specification](FEATURES_GHERKIN.md) · [Deployment guide](CLOUD_DEPLOYMENT.md)
 
+**Ask Loop:** a read-only photo review and conversational pickup search is implemented behind a backend feature flag, disabled by default. It uses an official in-process MCP client/server, server-only NVIDIA model adapter and existing booking handoff. See [configuration, verification and rollback](ASK_LOOP.md) and the [honest model evaluation record](docs/ASK_LOOP_EVALUATION.md). Live AI validation requires a configured backend NVIDIA key; ordinary manual booking remains available without it.
+
 ## Executive Summary & the Problem
 
 Households need to find collection partners who accept their waste, serve their address, and have a suitable pickup time. Collection providers need a schedule that stays consistent when multiple people reserve the same capacity. Payment completion must agree with that schedule.

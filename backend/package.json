@@ -17,27 +17,30 @@
     "start:cloud": "npm run migrate:postgres && node dist/prisma/seed.js && npm start"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@prisma/client": "6.19.3",
-    "express": "^5.1.0",
-    "zod": "^3.25.76",
-    "helmet": "^8.1.0",
-    "cors": "^2.8.5",
     "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
     "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
     "libphonenumber-js": "^1.12.24",
-    "pino": "^10.1.0"
+    "pino": "^10.1.0",
+    "sharp": "^0.35.5",
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
-    "tsx": "^4.20.6",
-    "vitest": "^4.1.11",
-    "supertest": "^7.1.4",
-    "@types/supertest": "^6.0.3",
-    "@types/express": "^5.0.5",
-    "@types/cors": "^2.8.19",
     "@types/cookie-parser": "^1.4.9",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.5",
     "@types/jsonwebtoken": "^9.0.10",
-    "@types/node": "^24.10.0"
+    "@types/node": "^24.10.0",
+    "@types/supertest": "^6.0.3",
+    "supertest": "^7.1.4",
+    "tsx": "^4.20.6",
+    "vitest": "^4.1.11"
   },
   "version": "1.0.0"
 }

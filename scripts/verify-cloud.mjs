@@ -43,6 +43,28 @@ try {
   console.log(
     "PASS: public Vercel frontend → Render → Neon, Secure/HttpOnly same-origin cookie and refresh rotation",
   );
+  const capabilityResponse = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/assistant/capabilities",
+  );
+  await page.getByRole("link", { name: "Ask Loop", exact: true }).click();
+  const capability = await capabilityResponse;
+  assert.equal(capability.status(), 200);
+  assert.equal((await capability.json()).data.enabled, false);
+  await visible(page.getByRole("heading", { name: "Ask Loop", exact: true }));
+  await visible(
+    page.getByText("Ask Loop is currently unavailable.", { exact: true }),
+  );
+  assert.equal(await page.getByLabel("What needs collecting?").count(), 0);
+  await page
+    .getByRole("link", { name: "Use manual collection search" })
+    .click();
+  await visible(
+    page.getByRole("heading", { name: "Good things start with a pickup." }),
+  );
+  console.log(
+    "PASS: hosted Ask Loop capability-disabled fallback and manual discovery navigation",
+  );
   await page
     .locator("article")
     .filter({

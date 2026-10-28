@@ -9,7 +9,7 @@ export interface NavigationState {
 
 export function appPath(value: unknown, fallback = "/providers") {
   return typeof value === "string" &&
-    /^\/(providers|addresses|orders|checkout|payment-result)(\/|\?|#|$)/.test(
+    /^\/(providers|addresses|orders|checkout|payment-result|ask)(\/|\?|#|$)/.test(
       value,
     ) &&
     !value.includes("\\")

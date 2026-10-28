@@ -2,10 +2,31 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createApp } from "../src/app.js";
 import { db, transaction } from "../src/repositories/db.js";
+import { env } from "../src/config/env.js";
+import { indianDay } from "../src/assistant/time.js";
 
 // Creates only isolated guest fixtures; it never truncates shared database tables.
 const userIds: string[] = [];
-const server = createApp().listen(0, "127.0.0.1");
+const server = createApp({
+  assistantModel: {
+    plan: async () => ({
+      intent: "search",
+      materials: ["PAPER"],
+      unsupportedItems: [],
+      addressLabel: "Home",
+      location: null,
+      date: { kind: "unknown", value: null },
+      after: null,
+      before: null,
+      sort: "cheapest",
+      missing: null,
+      screen: null,
+    }),
+    observe: async () => {
+      throw new Error("Postgres verifier never calls a vision model");
+    },
+  },
+}).listen(0, "127.0.0.1");
 await new Promise<void>((resolve) => server.once("listening", resolve));
 const address = server.address();
 assert(address && typeof address !== "string");
@@ -58,6 +79,45 @@ try {
   );
   assert(provider?.slots.length, "Seed providers/slots before verification.");
   const slot = provider.slots[0];
+  const originalAI = {
+    AI_ASSISTANT_ENABLED: env.AI_ASSISTANT_ENABLED,
+    NVIDIA_API_KEY: env.NVIDIA_API_KEY,
+    NVIDIA_CHAT_MODEL: env.NVIDIA_CHAT_MODEL,
+  };
+  try {
+    Object.assign(env, {
+      AI_ASSISTANT_ENABLED: true,
+      NVIDIA_API_KEY: "mock-transport-only",
+      NVIDIA_CHAT_MODEL: "mock-intent",
+    });
+    const ai = await request("/assistant/search", sessions[0], {
+      message: "Paper at Home",
+      date: indianDay(new Date(slot.startAt)),
+      addressId: addressLists[0].payload.data[0].id,
+    });
+    assert.equal(ai.status, 200);
+    assert.equal(ai.payload.data.outcome, "results");
+    assert.equal(ai.payload.data.addressId, addressLists[0].payload.data[0].id);
+    assert(
+      ai.payload.data.providers.every((card: { slots: { status: string }[] }) =>
+        card.slots.every((entry) => entry.status === "AVAILABLE"),
+      ),
+    );
+    assert.equal(
+      (
+        await request("/assistant/search", sessions[1], {
+          message: "Paper",
+          addressId: addressLists[0].payload.data[0].id,
+        })
+      ).status,
+      404,
+    );
+    console.log(
+      "PASS: real MCP → Postgres providers/live slots, mock intent, foreign-address isolation; no NVIDIA requests",
+    );
+  } finally {
+    Object.assign(env, originalAI);
+  }
   const attempts = await Promise.all(
     sessions.map((session, index) =>
       request("/bookings/hold", session, {

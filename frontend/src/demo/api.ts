@@ -254,6 +254,15 @@ export function createDemoApi() {
     if (route === "/auth/refresh" && method === "POST") return session;
     if (route === "/me" && method === "GET") return user;
     expire();
+    if (route === "/assistant/capabilities")
+      return {
+        enabled: false,
+        chat: false,
+        photo: false,
+        reason: "disabled",
+        categories: [],
+        imageMaxBytes: 2097152,
+      };
     if (route === "/addresses") {
       if (method === "GET") return addresses;
       if (method === "POST") {

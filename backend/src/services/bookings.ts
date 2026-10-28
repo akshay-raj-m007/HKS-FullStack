@@ -7,6 +7,7 @@ import { env } from "../config/env.js";
 import { expireInTransaction, expireHolds } from "../jobs/expiry.js";
 import { hash } from "../utils/crypto.js";
 import { assert, AppError } from "../utils/errors.js";
+import { acceptsMaterials, coversAddress } from "./providers.js";
 export async function holdBooking(
   userId: string,
   input: z.infer<typeof holdSchema>,
@@ -38,19 +39,13 @@ export async function holdBooking(
       });
       assert(provider, 404, "NOT_FOUND", "Provider was not found.");
       assert(
-        input.wasteTypes.every((w) =>
-          provider.wasteTypes.some((p) => p.wasteType === w),
-        ),
+        acceptsMaterials(provider.wasteTypes, input.wasteTypes),
         400,
         "UNSUPPORTED_WASTE",
         "This provider does not collect the selected waste.",
       );
       assert(
-        provider.serviceAreas.some(
-          (a) =>
-            a.postalCode === address.postalCode &&
-            a.city.toLowerCase() === address.city.toLowerCase(),
-        ),
+        coversAddress(provider.serviceAreas, address),
         400,
         "UNSUPPORTED_LOCATION",
         "This provider does not serve your address.",

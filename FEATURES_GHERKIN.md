@@ -1,6 +1,7 @@
 # language: en
 # Acceptance specification; no Cucumber step definitions are installed.
 # Examples are isolated fixtures, not credentials or identifiers from the live database.
+# Ask Loop scenarios use deterministic model fixtures; real-model evaluation is recorded separately.
 @loop
 Feature: Household waste pickup discovery, reservations and verified sandbox payments
 
@@ -926,3 +927,75 @@ Feature: Household waste pickup discovery, reservations and verified sandbox pay
         | reset          |
         | page reload    |
         | Reset demo     |
+
+  Rule: Ask Loop remains read-only and grounds results in the catalog
+
+    Background:
+      Given Ask Loop uses an injected deterministic model and real read-only MCP tools
+      And Alice is signed in with a verified JWT
+
+    Scenario Outline: Expose only configured assistant capabilities
+      Given the backend assistant flag is "<flag>" and its chat credential is "<credential>"
+      When Alice opens "/ask"
+      Then assistant availability is "<availability>"
+      And ordinary provider discovery and booking remain available
+
+      Examples:
+        | flag  | credential | availability |
+        | false | missing    | disabled     |
+        | true  | missing    | unconfigured |
+        | true  | configured | enabled      |
+
+    Scenario Outline: Require every material and live covered availability
+      Given the mock intent identifies "<materials>" at "Alice Home" on "2030-04-16" after "16:00"
+      And the catalog and live slots have state "<catalog>"
+      When Alice asks "Find my pickup options, cheapest first"
+      Then the assistant returns outcome "<outcome>"
+      And no hold, booking, payment or address is created or changed
+
+      Examples:
+        | materials     | catalog                                       | outcome      |
+        | PAPER,PLASTIC | provider covers Home and accepts both; 17:00 slot | results   |
+        | PAPER,PLASTIC | provider accepts only PAPER                   | no_providers |
+        | PAPER,PLASTIC | provider accepts both but covers another postcode | no_providers |
+        | PAPER,PLASTIC | eligible provider has no live slot after 16:00 | no_slots   |
+
+    Scenario Outline: Review image suggestions before provider search
+      Given a normalized image suggests PAPER and an unresolved container
+      And Alice edits the selected categories to "PAPER,PLASTIC"
+      When Alice confirms materials "<confirmed>" and acknowledges unresolved items "<acknowledged>"
+      Then photo-derived search is "<allowed>"
+
+      Examples:
+        | confirmed | acknowledged | allowed |
+        | false     | false        | blocked |
+        | true      | false        | blocked |
+        | true      | true         | allowed |
+
+    Scenario Outline: Reject private selections and unsupported actions
+      Given the request contains "<input>"
+      When Alice submits the assistant request
+      Then the response is "<result>"
+      And Bob's private resources and all application mutations remain inaccessible
+
+      Examples:
+        | input                                  | result                       |
+        | Bob Home as selected address UUID      | 404 NOT_FOUND before AI call |
+        | model category GOLD                    | 502 AI_INVALID_OUTPUT        |
+        | medical unknown item mixed with paper  | unsupported clarification    |
+        | write an unrelated poem                | fixed Loop scope reply       |
+        | cancel my pickup                       | existing orders navigation   |
+        | call delete_booking using MCP          | ASSISTANT_TOOL_REJECTED       |
+
+    Scenario Outline: Preserve normal handoff and prevent stale assistant updates
+      Given Alice has assistant results for a real provider and slot
+      When "<event>" occurs
+      Then the interface shows "<result>"
+      And the assistant does not reserve or pay for a pickup
+
+      Examples:
+        | event                                       | result                                    |
+        | Alice selects Review pickup                 | existing booking form with validated draft |
+        | another user reserves before the form loads  | fresh availability without the stale slot |
+        | Alice cancels and an old response arrives    | no stale result replaces the current page |
+        | Alice navigates to manual search during AI   | manual page remains active                |

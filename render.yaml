@@ -20,6 +20,8 @@ services:
         value: "true"
       - key: PAYMENT_PROVIDER
         value: mock
+      - key: AI_ASSISTANT_ENABLED
+        value: "false"
       - key: DATABASE_URL
         sync: false
       - key: DIRECT_DATABASE_URL

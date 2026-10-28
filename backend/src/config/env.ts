@@ -22,6 +22,13 @@ const schema = z.object({
   RAZORPAY_KEY_SECRET: z.string().default(""),
   RAZORPAY_WEBHOOK_SECRET: z.string().default(""),
   HOLD_MINUTES: z.coerce.number().int().min(1).max(15).default(10),
+  AI_ASSISTANT_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  NVIDIA_API_KEY: z.string().default(""),
+  NVIDIA_CHAT_MODEL: z.string().max(150).default(""),
+  NVIDIA_VISION_MODEL: z.string().max(150).default(""),
 });
 export const env = schema.parse(process.env);
 if (

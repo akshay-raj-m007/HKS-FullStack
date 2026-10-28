@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { MapPin, Package, Grid2X2, LogOut, ShieldCheck } from "lucide-react";
 import { useAuth } from "../features/auth/AuthContext";
 import { Logo, ErrorMessage } from "../components/ui";
@@ -65,6 +65,11 @@ export function AppLayout() {
         />
         <Outlet />
       </main>
+      {location.pathname !== "/ask" && (
+        <Link to="/ask" className="ask-loop-launcher">
+          Ask Loop
+        </Link>
+      )}
       <footer className="footer">
         <span>Small steps. A cleaner tomorrow.</span>
         <span>

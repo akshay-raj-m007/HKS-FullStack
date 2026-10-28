@@ -18,16 +18,34 @@ const servesLocation = (
   area.city.toLowerCase().includes(location.toLowerCase()) ||
   area.postalCode.includes(location);
 
-export async function providerList(filters: z.infer<typeof filterSchema>) {
-  await expireHolds();
-  let metadata = metadataCache.get("all");
+export const acceptsMaterials = (
+  supported: { wasteType: string }[],
+  selected: string[],
+) => selected.every((w) => supported.some((p) => p.wasteType === w));
+export const coversAddress = (
+  areas: { city: string; postalCode: string }[],
+  address: { city: string; postalCode: string },
+) =>
+  areas.some(
+    (area) =>
+      area.postalCode === address.postalCode &&
+      area.city.toLowerCase() === address.city.toLowerCase(),
+  );
+
+export async function providerList(
+  filters: z.infer<typeof filterSchema>,
+  cleanup = true,
+  useCache = true,
+) {
+  if (cleanup) await expireHolds();
+  let metadata = useCache ? metadataCache.get("all") : undefined;
   if (!metadata) {
     metadata = await db.serviceProvider.findMany({
       where: { active: true },
       include,
       orderBy: { name: "asc" },
     });
-    metadataCache.set("all", metadata, 30000);
+    if (useCache) metadataCache.set("all", metadata, 30000);
   }
   const matched = metadata.filter(
     (p) =>
