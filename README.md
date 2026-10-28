@@ -1,286 +1,216 @@
-# Loop - household waste pickup
+# Loop — Household Waste Pickup
 
-A complete local development application for mobile OTP sign-in, provider discovery, multiple pickup addresses, atomic slot reservations, sandbox payments, and private order history.
+**A deployed full-stack scheduling application that makes waste collection easier to book and harder to double-book.**
 
-React + TypeScript + Vite - Express + TypeScript - Prisma - SQLite
+[Live application](https://hks-fullstack.vercel.app) · [API health](https://hks-fullstack-api-m007.onrender.com/api/health) · [Functional specification](FEATURES_GHERKIN.md) · [Deployment guide](CLOUD_DEPLOYMENT.md)
 
-Live full-stack demo: **https://hks-fullstack.vercel.app** · [API health](https://hks-fullstack-api-m007.onrender.com/api/health)
+## Executive Summary & the Problem
 
-## Free full-stack deployment
+Households need to find collection partners who accept their waste, serve their address, and have a suitable pickup time. Collection providers need a schedule that stays consistent when multiple people reserve the same capacity. Payment completion must agree with that schedule.
 
-The cloud profile uses Vercel for React, Render Free for Express, and Neon Postgres for persistent data. Each visitor enters as a separate demo guest with a server-signed JWT and a fictional starter address. Payments are simulated and verified by the backend. See [CLOUD_DEPLOYMENT.md](CLOUD_DEPLOYMENT.md) for setup and verification.
+Loop connects provider discovery, saved addresses, temporary reservations, sandbox checkout, and private pickup history in one workflow. Its engineering focus is the coordination behind that workflow: transactional booking, database-enforced interval protection, verified payment settlement, and ownership checks on every private resource.
 
-An optional browser-only GitHub Pages demo is still available through the manually triggered `.github/workflows/deploy.yml`. Its data resets on reload. See [DEPLOYMENT.md](DEPLOYMENT.md) for that alternative. Pushes to `main` run `.github/workflows/ci.yml`, which checks the local app and the Postgres profile independently.
+**The hosted application is a portfolio demo backed by a real API and database.** Each visitor receives an isolated guest account. Payments are simulated; there is no real SMS verification, money movement, or pickup dispatch.
 
-## Quick start
+## Key Technical Highlights
 
-Prerequisite: Node.js 22.12+ or Node.js 24, and npm. No paid service, Redis, Docker, or SMS account is needed.
+| Engineering concern    | Implemented approach                                                                                                                                    |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Concurrent booking     | Conditional `AVAILABLE → HELD` claim inside a Serializable Prisma transaction, with bounded conflict retries and per-user idempotency keys.             |
+| Provider capacity      | One capacity across all service areas. Postgres exclusion constraints and SQLite triggers reject overlapping intervals, including partial overlaps.     |
+| Private resources      | Verified JWT subject supplies the user UUID; address, booking, order, and payment lookups include ownership predicates. Foreign resources return 404.   |
+| Session security       | Short access tokens stay in memory. Refresh tokens and OTPs are stored hashed. Refresh rotation detects replay and revokes the token family.            |
+| Payment integrity      | Amounts come from the provider record, in integer paise. Settlement verifies signatures and captured order/amount/currency before confirming the slot.  |
+| Historical correctness | Bookings preserve provider, address, price, time, and waste snapshots. Address edits cannot rewrite past pickup details.                                |
+| Expiry and recovery    | Ten-minute default holds expire transactionally. Late captures become `REFUND_REQUIRED` without reclaiming a released slot.                             |
+| Navigation correctness | Protected routes preserve intended destinations; filters and booking drafts use URL/history state; timers and listeners are cleaned up.                 |
+| Delivery               | GitHub Actions checks both database profiles. Vercel deploys the frontend from GitHub; a gated Actions deploy hook sends the verified commit to Render. |
 
-Run these commands **from the repository root**:
+### Tech Stack
+
+| Portion          | Technologies and responsibilities                                                                                                       |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend         | React 19, TypeScript, Vite, React Router, TanStack Query, React Hook Form, Zod, Lucide icons, custom responsive CSS.                    |
+| API              | Node.js, Express 5, TypeScript, JWT authentication, Zod validation, Helmet, configured CORS, rate-limit middleware, Pino logging.       |
+| Persistence      | Prisma 6; SQLite for local development; Neon Postgres for the hosted profile. Committed migrations for each database.                   |
+| Payment adapters | Explicit mock gateway; Razorpay **test-mode** adapter for local configuration, with signature/capture verification and signed webhooks. |
+| Quality          | Vitest, Supertest, Testing Library, Playwright, ESLint, TypeScript checks, Prettier.                                                    |
+| Hosting          | Vercel frontend and same-origin API proxy; Render Free Express service; the configured Neon project.                                    |
+
+## System Architecture
+
+The application is a modular monolith. HTTP routes delegate to domain services and ownership-aware repositories; Prisma handles persistence. The same layers support both database profiles.
+
+```mermaid
+graph TD
+    Visitor["Browser / recruiter"] --> Frontend["React + TypeScript SPA on Vercel"]
+    Frontend -->|"Same-origin /api requests"| Proxy["Vercel API rewrite"]
+    Proxy --> API["Express REST API on Render"]
+    API --> Guards["Verified JWT + Zod + ownership checks"]
+    Guards --> Services["Address, booking, provider and payment services"]
+    Services --> Prisma["Prisma repositories / Serializable transactions"]
+    Prisma --> Neon["Neon Postgres: hosted data"]
+    Prisma -.->|"Local profile"| SQLite["SQLite: local development"]
+    Services --> Cache["30-second provider metadata cache"]
+    Expiry["Hold expiry job / request cleanup"] --> Services
+    Services --> Payments["Mock gateway / local Razorpay test adapter"]
+
+    Push["Push to GitHub main"] --> CI["GitHub Actions: lint, types, tests, builds"]
+    CI --> PGChecks["Isolated Postgres integration checks"]
+    CI --> LocalChecks["SQLite and frontend checks"]
+    PGChecks --> Hook["Render hook: verified commit SHA"]
+    LocalChecks --> Hook
+    Hook --> API
+    Push --> VercelBuild["Vercel Git integration: frontend build"]
+    VercelBuild --> Frontend
+```
+
+**The database is the authority for availability.** The metadata cache never authorizes a reservation. External payment network calls run outside database transactions.
+
+The Vercel proxy keeps browser requests and refresh cookies on the frontend origin. Hosted cookies are Secure, HttpOnly, SameSite=Strict, and scoped to `/api/auth`. Database URLs, JWT signing secrets, and `RAZORPAY_KEY_SECRET` stay on the backend.
+
+### Data Model
+
+| Domain                             | Models                                                        |
+| ---------------------------------- | ------------------------------------------------------------- |
+| Identity and sessions              | `User`, `OtpChallenge`, `RefreshToken`                        |
+| Owned pickup locations             | `UserAddress`                                                 |
+| Provider catalog and coverage      | `ServiceProvider`, `ProviderWasteType`, `ProviderServiceArea` |
+| Reservable capacity                | `ProviderAvailabilitySlot`                                    |
+| Pickup and selected materials      | `Booking`, `BookingWasteType`                                 |
+| Settlement and event deduplication | `Payment`, `WebhookEvent`                                     |
+
+Primary keys are UUIDs. Prices use integer paise; timestamps represent UTC instants and display in Asia/Kolkata. Orders are views of booking records, rather than a separate order table.
+
+### State Transitions
+
+```text
+Slot:     AVAILABLE → HELD → BOOKED
+                       └─→ AVAILABLE on expiry, cancellation or mock failure
+
+Booking:  PENDING_PAYMENT → PAYMENT_PROCESSING → PROCESSING
+                    └─→ CANCELLED / PAYMENT_FAILED / EXPIRED
+
+Payment:  CREATED → PAID / FAILED / REFUND_REQUIRED
+```
+
+`COMPLETED` exists in the model and sample history. There is currently no public dispatch/completion endpoint or provider administration UI.
+
+## Try the Live Demo
+
+Open **https://hks-fullstack.vercel.app**.
+
+1. Click **Open interactive demo** to create a private guest session with a fictional Home address.
+2. Select **GreenCycle Services**, choose Home, select **Paper**, and pick an available future slot.
+3. Continue to payment, click **Pay**, and choose **Simulate successful payment**.
+4. Open **My pickups**, then reload to verify that the booking persists in Neon.
+5. Try a failed payment, an unpaid cancellation, address editing, or a separate incognito guest session.
+
+Use fictional details. The hosted guest entry issues a genuine server-signed JWT but does not claim to verify a real phone number. Signing out and entering again creates a different guest account. Render Free can need time to wake on the first request.
+
+The optional GitHub Pages profile is a separate browser-only simulation whose data resets on reload; it is not the hosted full-stack application described above.
+
+## Local Setup
+
+Prerequisites: **Node.js 22.12+ or Node.js 24**, npm, and Git. The SQLite/mock profile requires no cloud, SMS, or payment account.
+
+Run from the repository root:
 
 ```sh
-npm install
+git clone https://github.com/akshay-raj-m007/HKS-FullStack.git
+cd HKS-FullStack
+npm ci
 npm run setup
 npm run migrate
 npm run seed
 npm run dev
 ```
 
-Open **http://localhost:5173**. API: **http://localhost:4000/api**.
+Frontend: **http://localhost:5173** · API: **http://localhost:4000/api**
 
-`npm run setup` creates ignored backend/frontend `.env` files and generates independent random secrets. It never overwrites an existing environment file. Keep those secrets private.
+`npm run setup` creates ignored environment files with independent random secrets and generates the SQLite Prisma client. It preserves existing environment files.
 
-To run in separate terminals:
+For local OTP login, enter a valid mobile number, read its random `[DEV OTP]` code in the API terminal, and verify it within five minutes. There is no universal login code. Coverage includes Bengaluru `560001`, `560034`, `560038` and Mysuru `570001`, depending on the provider.
+
+### Database Seeding
 
 ```sh
-npm run dev -w backend
-npm run dev -w frontend
+npm run seed
+npm run seed:demo
 ```
 
-1. Enter a valid phone number, e.g. your own Indian mobile number with `+91`.
-2. Read the random `[DEV OTP] +91... => <six-digit code>` code in the backend terminal.
-3. Enter it within five minutes. There is no universal OTP.
-4. Add an address. Demo coverage: Bengaluru **560001**, **560034**, **560038**; Mysuru **570001**. Coverage varies by provider.
-5. Choose a provider, waste types, date, and time.
-6. Continue to payment. The slot is held for ten minutes.
-7. Click **Pay**, then **Simulate successful payment** or **Simulate failed payment**.
-8. A successful verified payment produces **PROCESSING** in **My pickups**.
+- `seed` additively upserts five providers, supported waste types, service areas, and availability for the next seven Indian calendar days. It preserves bookings; rerun it as the demo ages.
+- `seed:demo` additionally inserts four synthetic accounts and addresses, six bookings, and payment/waste records across sample states. It replaces only its deterministic fixture IDs and prints per-table insertion counts. Its intentionally invalid account phone numbers cannot be used for OTP sign-in.
 
-Seed reruns are additive/idempotent; they never clear bookings. Slots are generated for the next seven days in Asia/Kolkata. Run `npm run seed` again as the demo ages.
+The default local database is `backend/prisma/dev.db` and is excluded from Git. Keep `.env` files, local databases, and signing/payment secrets private.
 
-## Commands
+### Hosted Postgres Profile
 
-| Task                                 | Command from root                            |
-| ------------------------------------ | -------------------------------------------- |
-| Install reproducibly after cloning   | `npm ci`                                     |
-| Generate local environment           | `npm run setup`                              |
-| Apply committed migrations           | `npm run migrate`                            |
-| Generate Prisma client explicitly    | `npm run generate -w backend`                |
-| Seed providers and future slots      | `npm run seed`                               |
-| API development server               | `npm run dev -w backend`                     |
-| React development server             | `npm run dev -w frontend`                    |
-| API integration/security tests       | `npm test -w backend`                        |
-| React component/flow tests           | `npm test -w frontend`                       |
-| Both suites                          | `npm test`                                   |
-| Browser acceptance test              | `npm run test:e2e`                           |
-| TypeScript                           | `npm run typecheck`                          |
-| ESLint                               | `npm run lint`                               |
-| Format                               | `npm run format`                             |
-| Build both applications              | `npm run build`                              |
-| All regular quality checks           | `npm run check`                              |
-| Start compiled API with local config | `npm start -w backend`                       |
-| Preview frontend build               | `npm run preview -w frontend -- --port 5173` |
-| Dependency advisories                | `npm audit`                                  |
+See [CLOUD_DEPLOYMENT.md](CLOUD_DEPLOYMENT.md) for Neon linking, pooled/direct URLs, production settings, and safe migration verification. Once your own Neon branch is linked:
 
-The browser test uses installed Google Chrome by default. To use Edge: set `PLAYWRIGHT_CHANNEL=msedge`. Alternatively install a Playwright browser and adapt the channel setting. It starts isolated servers on 4001/5174, uses `e2e.db`, and records screenshots in ignored `test-results/`. API tests use a separate `test.db`; they never clear `dev.db`. Test fixtures reset only their dedicated test database.
+```sh
+npm run neon:generate
+npm run neon:migrate
+npm run neon:seed
+npm run build
+npm run neon:verify
+npm run neon:start
+```
 
-## Architecture and directory tree
+The verification command starts the app against the linked branch and cleans up only its own guest fixtures. Test migrations on an isolated branch before production. To return to SQLite, run `npm run generate -w backend` before local startup.
+
+## API and Frontend Surface
+
+All routes below are relative to `/api`. Private endpoints require a verified bearer token.
+
+| Area                   | API surface                                                                                            | Frontend routes                    |
+| ---------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------- |
+| Authentication         | `POST /auth/demo`, `/auth/request-otp`, `/auth/verify-otp`, `/auth/refresh`, `/auth/logout`; `GET /me` | `/login`, `/verify`                |
+| Saved addresses        | `GET, POST /addresses`; `GET, PATCH, DELETE /addresses/:id`                                            | `/addresses`                       |
+| Discovery              | `GET /providers`, `/providers/:id`, `/providers/:id/availability`                                      | `/providers`, `/providers/:id`     |
+| Reservations           | `POST /bookings/hold`, `/bookings/:id/cancel`; `GET /bookings`, `/bookings/:id`                        | `/checkout/:id`                    |
+| Payments               | `POST /payments/create`, `/payments/verify`, `/payments/mock`; `GET /payments/:id`                     | Checkout and `/payment-result/:id` |
+| History                | `GET /orders`, `/orders/:id`                                                                           | `/orders`, `/orders/:id`           |
+| Integration/operations | `POST /payments/webhook` with gateway signature; public `GET /health`                                  | No admin UI                        |
+
+Success responses use `{ "data": ... }`. Errors use `{ "error": { "code", "message", "fields"?, "requestId" } }`. Strict schemas reject unknown fields and client-supplied identity/amount overrides. Address PATCH accepts the complete address form; only unused owned addresses can be deleted.
+
+## Verification & Project Navigation
+
+```sh
+npm run check          # lint, types, backend/frontend tests, builds
+npm run test:e2e       # local browser acceptance and navigation checks
+npm run neon:verify   # linked Postgres branch integration checks
+npm run cloud:verify  # actual public Vercel → Render → Neon browser flow
+```
+
+Local API tests use `test.db`; local browser tests use `e2e.db`. The cloud browser check creates fictional guest/pickup records in the hosted demo. Playwright defaults to installed Chrome for the local/cloud commands; Edge can be selected with `PLAYWRIGHT_CHANNEL=msedge`.
+
+[FEATURES_GHERKIN.md](FEATURES_GHERKIN.md) records the functional acceptance contract with concrete fixtures and expected outcomes. It is a Gherkin specification; Cucumber step definitions are not wired into the test runner.
 
 ```text
-.
-+-- ARCHITECTURE.md
-+-- README.md
-+-- package.json / package-lock.json
-+-- eslint.config.mjs
-+-- playwright.config.ts
-+-- scripts/
-|   +-- setup.mjs
-|   +-- e2e-server.mjs
-+-- e2e/acceptance.spec.ts
-+-- backend/
-|   +-- .env.example
-|   +-- prisma/
-|   |   +-- schema.prisma
-|   |   +-- migrations/
-|   |   +-- seed.ts
-|   |   +-- seed-data.ts
-|   +-- src/
-|   |   +-- config/          validated environment
-|   |   +-- middleware/      JWT authentication
-|   |   +-- otp/             delivery interface + console adapter
-|   |   +-- payments/        gateway interface + mock/Razorpay adapters
-|   |   +-- rateLimit/       store interface + memory implementation
-|   |   +-- repositories/    Prisma + mandatory ownership lookups
-|   |   +-- routes/          thin HTTP adapters
-|   |   +-- security/        access and refresh token primitives
-|   |   +-- services/        auth, addresses, providers, bookings, payments, cache
-|   |   +-- jobs/            expiry transaction
-|   |   +-- validators/      strict request schemas
-|   |   +-- utils/           errors and cryptography
-|   |   +-- app.ts
-|   |   +-- server.ts
-|   +-- tests/               API/security/concurrency acceptance tests
-+-- frontend/
-    +-- .env.example
-    +-- src/
-        +-- api/             fetch client + single-flight refresh
-        +-- components/      shared accessible UI
-        +-- features/
-        |   +-- auth/
-        |   +-- addresses/
-        |   +-- providers/
-        |   +-- bookings/
-        |   +-- payments/
-        |   +-- orders/
-        +-- layouts/
-        +-- routes/
-        +-- schemas/
-        +-- test/
-        +-- types/
-        +-- utils/
-        +-- main.tsx
-        +-- styles.css
+frontend/src/          Feature pages, forms, API client, auth and navigation
+backend/src/routes/   HTTP adapters and request validation
+backend/src/services/ Domain state transitions and payment orchestration
+backend/src/repositories/ UUID ownership lookups and transaction helper
+backend/prisma/       SQLite schema, migrations and seed scripts
+backend/prisma/postgres/ Hosted schema and interval/state constraints
+backend/tests/        API, ownership, session and concurrency tests
+e2e/                  Local browser acceptance and navigation tests
+pages-e2e/            Built static-demo browser check
+.github/workflows/    CI and optional manual Pages deployment
 ```
 
-The modular monolith keeps HTTP handling, business state transitions, ownership queries, and external adapters separate. React Query manages server state; React Hook Form and Zod handle forms. Access tokens stay in memory. React Router protects application pages.
+## Future Roadmap & Scalability Improvements
 
-## Database
+| Area                 | Current implementation                                                            | Next improvement                                                                                                                                                 |
+| -------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Caching              | In-process provider metadata cache with a 30-second TTL.                          | Add a shared metadata cache with explicit invalidation; keep slot claims database-authoritative.                                                                 |
+| Rate limiting        | Per-process fixed-window counters and route-specific limits.                      | Shared rate-limit storage, coordinated limits across instances, and stronger abuse controls for guest/session creation.                                          |
+| Observability        | Pino request logs with redaction, request IDs, and database-backed health checks. | OpenTelemetry traces, latency/error metrics, alerting, and booking/payment reconciliation dashboards.                                                            |
+| Operations           | Background hold expiry, bounded transaction retries, native database constraints. | Durable scheduled cleanup, retention policies, backup/restore exercises, and capacity/load testing.                                                              |
+| Payment recovery     | Deduplicated events and `REFUND_REQUIRED` for late captures.                      | Operator reconciliation tools, refund execution, and audited support workflows.                                                                                  |
+| Product growth       | Provider discovery, address CRUD, reservations, and private history.              | Authenticated provider administration, dispatch/completion workflow, pagination beyond current 100-record limits, and accessible end-to-end regression coverage. |
+| Real customer launch | Hosted guest demo and mock payments; optional local Razorpay test adapter.        | Real SMS delivery, account recovery, reviewed production payment policies, and stronger operational/privacy controls before enabling real service.               |
 
-All primary entity IDs are UUIDs. The committed schema includes normalized waste-type and service-area junction tables, foreign keys, unique references, and indexes.
-
-| Entity                   | Purpose                                                           |
-| ------------------------ | ----------------------------------------------------------------- |
-| User                     | Unique normalized phone and UUID identity                         |
-| UserAddress              | Multiple owned pickup addresses                                   |
-| OtpChallenge             | Keyed OTP hash, expiry, attempts, consumption timestamp           |
-| RefreshToken             | SHA-256 token hash, family, expiry and revocation                 |
-| ServiceProvider          | Description, integer paise price, active flag, demo rating        |
-| ProviderWasteType        | Supported waste types                                             |
-| ProviderServiceArea      | Supported city/postal-code pairs                                  |
-| ProviderAvailabilitySlot | A single globally reservable provider interval                    |
-| Booking                  | User ownership, request idempotency and historical snapshots      |
-| BookingWasteType         | Selected waste types                                              |
-| Payment                  | One durable payment record per booking, unique gateway references |
-| WebhookEvent             | Idempotent processing ledger                                      |
-
-Provider, price, address, waste types, and UTC slot timestamps are captured with the booking. Editing an address does not alter history. A referenced address cannot be deleted.
-
-Ratings are clearly labelled demo placeholders. Prices are flat per pickup, in INR, stored as integer paise. Times are stored as UTC instants and displayed in **Asia/Kolkata**. Server date filters use Indian calendar-day boundaries.
-
-## Authentication
-
-- Phones normalize to E.164 using libphonenumber-js (India default).
-- Cryptographically random six-digit OTPs are HMAC-SHA256 hashed with a separate secret. Expiry is five minutes; at most five verification attempts.
-- Resends require 60 seconds, with at most five per phone/hour, plus IP limits.
-- New challenges invalidate older ones. Successful verification atomically consumes the challenge.
-- Access tokens are signed HS256 JWTs with fixed issuer/audience and 15-minute default lifetime.
-- Refresh tokens are opaque 48-byte random values. Only hashes are stored.
-- Refresh rotates atomically; replay of a revoked token revokes its family.
-- The refresh cookie is HttpOnly, SameSite=Strict, and scoped to `/api/auth`. Local HTTP uses `secure:false`.
-- Refresh/logout require a custom header and enforce origin checks. Client refresh is single-flight to avoid duplicate rotation within a tab.
-- Logout revokes the refresh family and clears the cookie. Already-issued access tokens expire naturally within their short lifetime.
-
-Every owned-resource lookup includes the authenticated user UUID. Request bodies cannot override user identity, amount, or state. Non-owned UUIDs return 404 without revealing existence.
-
-## Slot concurrency and state transitions
-
-A provider has **one capacity across all areas** during a time interval.
-
-1. Validate owned address, current provider coverage, supported waste and server price.
-2. In a SQLite transaction, conditionally update the selected slot where `status=AVAILABLE`, provider matches, and start is beyond the hold window.
-3. Exactly one affected row is required; otherwise return **409 SLOT_NOT_AVAILABLE**.
-4. Insert the booking and link the slot within the same transaction.
-5. SQLite serializes writes; bounded retries handle transient transaction conflicts.
-6. Per-user idempotency keys and payload hashes make retries return the original booking and reject changed payloads.
-
-A database unique interval key alone is insufficient. The availability service checks `existing.startAt < new.endAt && existing.endAt > new.startAt` transactionally. SQLite insert/update triggers enforce the same invariant, including partial overlaps, even for direct scripts. Separate triggers validate slot state fields.
-
-```text
-AVAILABLE -> HELD -> BOOKED
-              -> AVAILABLE on expiry, cancellation, or mock failure
-
-PENDING_PAYMENT -> PAYMENT_PROCESSING -> PROCESSING
-       -> EXPIRED / CANCELLED / PAYMENT_FAILED
-
-CREATED -> PAID / FAILED / REFUND_REQUIRED
-```
-
-Cleanup runs every 30 seconds and during availability/booking operations. Expiry and release are transactional. A late payment cannot reclaim a released slot. It is recorded as **REFUND_REQUIRED** for operator handling.
-
-## Payments
-
-### Local mock (default)
-
-No credentials or network access. The adapter generates an order and server-side captured-payment proof. The mock success endpoint goes through the same signature, captured-amount and transactional settlement logic. A failure releases the hold. There is no client-controlled price or unverified "paid" flag.
-
-### Razorpay test mode
-
-Edit `backend/.env`:
-
-```dotenv
-PAYMENT_PROVIDER=razorpay
-RAZORPAY_KEY_ID=rzp_test_your_key
-RAZORPAY_KEY_SECRET=your_test_secret
-RAZORPAY_WEBHOOK_SECRET=your_webhook_secret
-```
-
-Restart the API. The application rejects any key ID that does not start with `rzp_test_`. The browser only receives the public key ID; secrets remain server-side.
-
-- Create a gateway order using the booking's amount/currency.
-- Open the official Razorpay Checkout script.
-- Verify HMAC-SHA256 over the **stored** order ID and payment ID using timing-safe comparison.
-- Fetch payment state from Razorpay and require captured status, matching order, currency, and amount.
-- Atomically mark payment PAID, booking PROCESSING, and slot BOOKED.
-- Configure automatic capture in your Razorpay test dashboard.
-- Configure a test webhook to `POST /api/payments/webhook` for `payment.captured` and `payment.failed`. Razorpay needs a reachable HTTPS URL; local mock requires no tunnel.
-- Validate the webhook signature against the raw body before parsing and deduplicate event IDs transactionally.
-- Failed gateway attempts retain the hold for Checkout retries. Expiry eventually releases it.
-
-Only one durable order-creation claim is allowed per booking. Network ambiguity leaves that claim pending instead of issuing another remote order. An operator must reconcile it by receipt; development users can let the hold expire. Late captures require refund review; automatic refunds are deliberately not implemented.
-
-Integration references: [Razorpay Checkout](https://razorpay.com/docs/payments/payment-gateway/web-integration/standard/integration-steps/), [webhook validation](https://razorpay.com/docs/webhooks/validate-test/), [SQLite isolation](https://www.sqlite.org/isolation.html), [Prisma transactions](https://docs.prisma.io/docs/orm/v7/prisma-client/queries/transactions).
-
-## REST API
-
-Success: `{ "data": ... }`. Error: `{ "error": { "code", "message", "fields"?, "requestId" } }`.
-
-All user/provider/booking/payment endpoints require `Authorization: Bearer <access token>`. Mutations accept only JSON. Unknown request fields are rejected by domain schemas.
-
-| Method             | Path                                                                                   |
-| ------------------ | -------------------------------------------------------------------------------------- |
-| POST               | /api/auth/request-otp - phone                                                          |
-| POST               | /api/auth/verify-otp - phone, challengeId, code                                        |
-| POST               | /api/auth/refresh - cookie + X-Requested-With: Loop                                    |
-| POST               | /api/auth/logout - cookie + X-Requested-With: Loop                                     |
-| GET                | /api/me                                                                                |
-| GET, POST          | /api/addresses                                                                         |
-| GET, PATCH, DELETE | /api/addresses/:id                                                                     |
-| GET                | /api/providers?wasteType=&location=&date=&slot=morning\|afternoon                      |
-| GET                | /api/providers/:id                                                                     |
-| GET                | /api/providers/:id/availability                                                        |
-| POST               | /api/bookings/hold - providerId, slotId, addressId, wasteTypes; Idempotency-Key header |
-| GET                | /api/bookings, /api/bookings/:id                                                       |
-| POST               | /api/bookings/:id/cancel                                                               |
-| GET                | /api/orders, /api/orders/:id                                                           |
-| POST               | /api/payments/create - bookingId                                                       |
-| POST               | /api/payments/verify - bookingId and Razorpay proof fields                             |
-| POST               | /api/payments/mock - bookingId, outcome: success\|failure                              |
-| GET                | /api/payments/:id                                                                      |
-| POST               | /api/payments/webhook - signed raw JSON                                                |
-| GET                | /api/health                                                                            |
-
-Address PATCH currently accepts the complete address form. Unused-address deletion returns 204.
-
-## Security and operational boundaries
-
-Implemented: strict Zod validation, React escaping, plain-text field validation, Helmet/CSP headers on the API, strict configured CORS, origin validation, body limits, secure errors without stack traces, JWT verification, hashed secrets, per-resource ownership, rate limits, parameterized Prisma queries, and structured redacted request logs. SQL migrations contain static triggers only; no user input is interpolated into SQL. No secrets are committed.
-
-Provider metadata is cached for 30 seconds through a cache interface. Availability always comes from the database; claiming never trusts the cache. The rate limiter and cache use local memory and are not suitable as distributed coordination.
-
-**This is a portfolio demo, not a real customer service.** `NODE_ENV=production` permits only the explicit public-demo profile with mock payments, Postgres, and an HTTPS frontend. Real customer production remains disabled.
-
-Before real deployment:
-
-- Implement real SMS delivery and remove console OTP logging.
-- Review abuse prevention, phone verification limits and account recovery.
-- Use HTTPS, Secure cookies, a secrets manager, trusted proxy configuration, and appropriate frontend CSP for Razorpay.
-- Add distributed rate limiting/cache adapters for multiple instances and operational monitoring.
-- Add gateway order reconciliation, refund execution, signed-event retention, payment support procedures, and carefully reviewed live-mode configuration.
-- Add provider administration, dispatch/completion workflow, pickup support, and policy-driven cancellation/refunds.
-- Add pagination beyond the current 100-item order/slot limits, retention cleanup, backups and restore tests.
-- Evaluate a production database and capacity plan; the local SQLite write model deliberately favors correctness over throughput.
-- Add revocable access sessions if immediate post-logout access-token invalidation is required.
-- Review accessibility, dependency updates, privacy/retention, observability, and deployment hardening.
-- Set appropriate OTP/webhook/session cleanup schedules. Current local tables retain their audit history.
-
-No real SMS, live payment, delivery dispatch or automatic refund is performed. Razorpay test mode needs your own test credentials; local mock is fully usable without them. Fonts are bundled locally; the mock development flow requires no external browser requests.
+The deployed profile intentionally remains a sandbox. It demonstrates real database transactions and access control without representing a live collection business.
