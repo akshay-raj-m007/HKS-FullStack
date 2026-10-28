@@ -5,6 +5,9 @@ on:
   pull_request:
 permissions:
   contents: read
+concurrency:
+  group: full-stack-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   local-app:
     runs-on: ubuntu-latest
@@ -44,3 +47,26 @@ jobs:
       - run: npm run neon:migrate
       - run: npm run neon:seed
       - run: npm run neon:verify
+  deploy-render:
+    needs: [local-app, postgres]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy verified commit to Render Free
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          node --input-type=module <<'NODE'
+          try {
+            if (!process.env.RENDER_DEPLOY_HOOK) throw new Error();
+            const url = new URL(process.env.RENDER_DEPLOY_HOOK);
+            if (url.origin !== 'https://api.render.com') throw new Error();
+            url.searchParams.set('ref', process.env.GITHUB_SHA);
+            const response = await fetch(url, { method: 'POST' });
+            if (!response.ok) throw new Error();
+            console.log('Render accepted deployment of verified commit ' + process.env.GITHUB_SHA);
+          } catch {
+            console.error('Render deployment could not be triggered. Configure the RENDER_DEPLOY_HOOK repository secret and check the service status.');
+            process.exitCode = 1;
+          }
+          NODE

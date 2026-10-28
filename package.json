@@ -21,6 +21,7 @@
     "neon:seed": "node scripts/neon-run.mjs seed",
     "neon:verify": "node scripts/neon-run.mjs verify",
     "neon:start": "node scripts/neon-run.mjs start",
+    "cloud:verify": "node scripts/verify-cloud.mjs",
     "check": "npm run lint && npm run typecheck && npm test && npm run build",
     "format": "prettier --write .",
     "test:e2e": "playwright test",

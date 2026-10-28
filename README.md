@@ -4,6 +4,8 @@ A complete local development application for mobile OTP sign-in, provider discov
 
 React + TypeScript + Vite - Express + TypeScript - Prisma - SQLite
 
+Live full-stack demo: **https://hks-fullstack.vercel.app** · [API health](https://hks-fullstack-api-m007.onrender.com/api/health)
+
 ## Free full-stack deployment
 
 The cloud profile uses Vercel for React, Render Free for Express, and Neon Postgres for persistent data. Each visitor enters as a separate demo guest with a server-signed JWT and a fictional starter address. Payments are simulated and verified by the backend. See [CLOUD_DEPLOYMENT.md](CLOUD_DEPLOYMENT.md) for setup and verification.

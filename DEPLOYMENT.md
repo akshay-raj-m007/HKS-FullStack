@@ -118,8 +118,8 @@ Remove-Item Env:VITE_BASE_PATH
 Render has a Free web-service option, and Neon has a Free Postgres plan. These are possible services for a future backend deployment, but **Render + Neon is not compatible with this SQLite implementation by changing only `DATABASE_URL`**:
 
 - SQLite files on Render Free are ephemeral; Free services cannot attach persistent disks. Changes can disappear on restart or redeployment. An automatically reseeded disposable server would still need an appropriate public demo authentication policy.
-- Neon/Supabase use Postgres. This repository's Prisma datasource, migrations, SQLite triggers, and concurrency guarantees need a reviewed Postgres implementation before switching databases.
-- The current backend intentionally refuses `NODE_ENV=production`. Console OTP delivery also does not give recruiters a self-service sign-in flow.
+- Neon/Supabase use Postgres. The current cloud profile supplies a separate Postgres schema, migrations, and database overlap protection; see CLOUD_DEPLOYMENT.md. The local SQLite profile remains available independently.
+- The current cloud profile permits a restricted public demo with server-issued guest JWTs and mock payments. Real customer production and hosted console-OTP login remain disabled.
 - Refresh cookies are `SameSite=Strict`. A GitHub Pages origin and an unrelated backend host are cross-site, so refresh-cookie authentication requires a deliberate cookie/origin deployment policy or a suitable same-site hosting arrangement. Merely setting CORS or `VITE_API_URL` does not solve this.
 
 The Pages demo avoids those deployment dependencies while keeping the existing backend invariants. It is the configured zero-cost portfolio deployment. A future API deployment should retain server-side JWT verification, user isolation, hashed credentials, atomic reservations, signature verification, and backend-only payment secrets.

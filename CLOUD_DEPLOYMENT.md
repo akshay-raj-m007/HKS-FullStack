@@ -2,6 +2,10 @@
 
 Repository: https://github.com/akshay-raj-m007/HKS-FullStack
 
+Frontend: https://hks-fullstack.vercel.app
+
+API health: https://hks-fullstack-api-m007.onrender.com/api/health
+
 This profile runs the actual Express API against Neon Postgres. The Vercel frontend calls `/api`, which Vercel rewrites to the Render service. Refresh cookies therefore belong to the frontend origin. No database URL or signing secret is compiled into the frontend.
 
 ## Profiles
@@ -61,17 +65,17 @@ Before returning to SQLite development, run `npm run generate -w backend` to reg
 
 Required backend environment:
 
-| Name | Value |
-| --- | --- |
-| `NODE_ENV` | `production` |
-| `HOST` | `0.0.0.0` |
-| `PUBLIC_DEMO_MODE` | `true` |
-| `PAYMENT_PROVIDER` | `mock` |
-| `DATABASE_URL` | Neon pooled URL, kept secret |
-| `DIRECT_DATABASE_URL` | Neon direct URL, kept secret |
-| `JWT_ACCESS_SECRET` | Random server-only secret, at least 32 characters |
-| `OTP_HASH_SECRET` | Separate random server-only secret, at least 32 characters |
-| `FRONTEND_URL` | The exact production Vercel HTTPS origin, without a trailing slash |
+| Name                  | Value                                                              |
+| --------------------- | ------------------------------------------------------------------ |
+| `NODE_ENV`            | `production`                                                       |
+| `HOST`                | `0.0.0.0`                                                          |
+| `PUBLIC_DEMO_MODE`    | `true`                                                             |
+| `PAYMENT_PROVIDER`    | `mock`                                                             |
+| `DATABASE_URL`        | Neon pooled URL, kept secret                                       |
+| `DIRECT_DATABASE_URL` | Neon direct URL, kept secret                                       |
+| `JWT_ACCESS_SECRET`   | Random server-only secret, at least 32 characters                  |
+| `OTP_HASH_SECRET`     | Separate random server-only secret, at least 32 characters         |
+| `FRONTEND_URL`        | The exact production Vercel HTTPS origin, without a trailing slash |
 
 Render supplies `PORT`. The cloud start command deploys migrations and additively seeds catalog/future availability before starting the server. Existing bookings are preserved. Run the seed again as the demo ages, or redeploy to refresh the next seven days of slots.
 
@@ -90,7 +94,19 @@ Project: `hks-fullstack`. **Root Directory: `frontend`**, with source files outs
 
 `build:vercel` compiles the public hosted-demo frontend using `/api` and BrowserRouter. It disables the browser-only demo adapter. No frontend secrets are required. If the Render hostname changes, update the rewrite destination in `frontend/vercel.json` and redeploy.
 
-Connect `akshay-raj-m007/HKS-FullStack` to the Vercel project and Render service with their GitHub integrations for automatic deploys on `main`. `.github/workflows/ci.yml` runs lint, TypeScript, the existing suites/builds, and isolated Postgres service tests on pushes and pull requests. Native platform builds also compile the apps before publishing them.
+Connect `akshay-raj-m007/HKS-FullStack` to the Vercel project with its GitHub integration for frontend deploys on `main`. `.github/workflows/ci.yml` runs lint, TypeScript, the existing suites/builds, and isolated Postgres service tests on pushes and pull requests. After those jobs pass on `main`, it triggers Render's deploy hook with the exact verified commit SHA. Native platform builds also compile the apps before publishing them.
+
+The Render service was created from its public repository URL. Render cannot automatically deploy that source without a Git-provider connection, so the Actions deploy-hook job handles it. Copy the secret Deploy Hook URL from the Render service's Settings into the GitHub repository Actions secret **`RENDER_DEPLOY_HOOK`**. Keep the URL private; it is not a frontend variable. The Render CLI/API used during setup did not expose this secret URL. The deployment job fails with a clear message until the secret is set.
+
+Vercel also requires a GitHub Login Connection on your Vercel account before `vercel git connect` can enable its native Git integration. CLI production deployment works independently of that connection.
+
+To repeat the real public browser checks locally:
+
+```powershell
+npm run cloud:verify
+```
+
+This opens Chrome headlessly against the production Vercel URL, verifies secure same-origin cookies and refresh rotation, books/pays for a sample pickup, reloads it to prove persistence, checks a second guest receives 404 for that pickup, and signs out. It creates fictional guest records and a sample pickup in the hosted demo. The screenshot is saved to ignored `test-results/cloud-demo.png`.
 
 ## Manual sanity check
 
@@ -104,3 +120,18 @@ Connect `akshay-raj-m007/HKS-FullStack` to the Vercel project and Render service
 8. Sign out and confirm protected routes return to the demo entry page.
 
 No real SMS, money movement, pickup dispatch, or verified customer signup occurs. The hosted profile exercises actual API/database behavior with synthetic guests.
+
+## Verified during setup
+
+`npm run build` passed for both workspaces. The backend suite passed 33 tests and the frontend suite passed 25 tests. The Postgres verifier passed first on `hks-deployment-check`, then on `production`, with this output:
+
+```text
+PASS: server started, Neon health query, separate JWT guest identities
+PASS: concurrent reservations yield one winner; other guest cannot access booking
+PASS: mock signature verification and paid booking persisted in Neon
+PASS: refresh rotation and replay rejection
+PASS: database rejects partially overlapping provider slots
+Verification guest fixtures cleaned up.
+```
+
+The public `npm run cloud:verify` browser run also passed secure cookie/refresh behavior, persistent checkout after reload, another guest's 404 response, sign-out, and absence of browser exceptions. The initial Vercel Linux build failed on missing optional Rollup binaries from the Windows-generated lockfile; pinned optional Linux Rollup/esbuild packages fixed the deployment. The initial four-worker frontend test run hit a Windows worker-start timeout; using one worker passed all tests. These fixes are committed.
