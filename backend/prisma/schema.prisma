@@ -1,0 +1,217 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum WasteType {
+  PLASTIC
+  FOOD
+  GREEN_WASTE
+  PAPER
+  ELECTRONIC
+  GENERAL
+}
+
+enum SlotStatus {
+  AVAILABLE
+  HELD
+  BOOKED
+}
+
+enum BookingStatus {
+  PENDING_PAYMENT
+  PAYMENT_PROCESSING
+  PROCESSING
+  COMPLETED
+  CANCELLED
+  PAYMENT_FAILED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  CREATED
+  PAID
+  FAILED
+  REFUND_REQUIRED
+}
+
+model User {
+  id            String                     @id @default(uuid())
+  phone         String                     @unique
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
+  addresses     UserAddress[]
+  refreshTokens RefreshToken[]
+  bookings      Booking[]
+  heldSlots     ProviderAvailabilitySlot[]
+}
+
+model UserAddress {
+  id           String    @id @default(uuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label        String
+  contactName  String
+  contactPhone String
+  addressLine1 String
+  addressLine2 String    @default("")
+  city         String
+  state        String
+  postalCode   String
+  latitude     Float?
+  longitude    Float?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  bookings     Booking[]
+
+  @@index([userId])
+}
+
+model OtpChallenge {
+  id         String    @id @default(uuid())
+  phone      String
+  codeHash   String
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([phone, createdAt])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  familyId  String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([familyId])
+  @@index([userId])
+}
+
+model ServiceProvider {
+  id           String                     @id @default(uuid())
+  name         String                     @unique
+  description  String
+  price        Int
+  currency     String                     @default("INR")
+  active       Boolean                    @default(true)
+  rating       Float                      @default(4.8)
+  color        String                     @default("sage")
+  createdAt    DateTime                   @default(now())
+  updatedAt    DateTime                   @updatedAt
+  wasteTypes   ProviderWasteType[]
+  serviceAreas ProviderServiceArea[]
+  slots        ProviderAvailabilitySlot[]
+  bookings     Booking[]
+}
+
+model ProviderWasteType {
+  id         String          @id @default(uuid())
+  providerId String
+  provider   ServiceProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  wasteType  WasteType
+
+  @@unique([providerId, wasteType])
+}
+
+model ProviderServiceArea {
+  id         String          @id @default(uuid())
+  providerId String
+  provider   ServiceProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  city       String
+  postalCode String
+
+  @@unique([providerId, postalCode])
+  @@index([postalCode])
+}
+
+model ProviderAvailabilitySlot {
+  id              String          @id @default(uuid())
+  providerId      String
+  provider        ServiceProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  startAt         DateTime
+  endAt           DateTime
+  status          SlotStatus      @default(AVAILABLE)
+  heldByUserId    String?
+  heldBy          User?           @relation(fields: [heldByUserId], references: [id])
+  holdExpiresAt   DateTime?
+  activeBookingId String?         @unique
+  activeBooking   Booking?        @relation("ActiveSlotBooking", fields: [activeBookingId], references: [id])
+  bookings        Booking[]       @relation("BookingSlot")
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@unique([providerId, startAt, endAt])
+  @@index([providerId, status, startAt])
+  @@index([status, holdExpiresAt])
+}
+
+model Booking {
+  id              String                    @id @default(uuid())
+  userId          String
+  user            User                      @relation(fields: [userId], references: [id])
+  providerId      String
+  provider        ServiceProvider           @relation(fields: [providerId], references: [id])
+  slotId          String
+  slot            ProviderAvailabilitySlot  @relation("BookingSlot", fields: [slotId], references: [id])
+  activeSlot      ProviderAvailabilitySlot? @relation("ActiveSlotBooking")
+  addressId       String
+  address         UserAddress               @relation(fields: [addressId], references: [id])
+  providerName    String
+  addressSnapshot Json
+  startAt         DateTime
+  endAt           DateTime
+  amount          Int
+  currency        String                    @default("INR")
+  status          BookingStatus             @default(PENDING_PAYMENT)
+  holdExpiresAt   DateTime
+  idempotencyKey  String
+  requestHash     String
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  wasteTypes      BookingWasteType[]
+  payment         Payment?
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, createdAt])
+  @@index([status, holdExpiresAt])
+}
+
+model BookingWasteType {
+  id        String    @id @default(uuid())
+  bookingId String
+  booking   Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  wasteType WasteType
+
+  @@unique([bookingId, wasteType])
+}
+
+model Payment {
+  id                String        @id @default(uuid())
+  bookingId         String        @unique
+  booking           Booking       @relation(fields: [bookingId], references: [id])
+  provider          String
+  providerOrderId   String?       @unique
+  providerPaymentId String?       @unique
+  amount            Int
+  currency          String
+  status            PaymentStatus @default(CREATED)
+  creationStartedAt DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+}
+
+model WebhookEvent {
+  id        String   @id @default(uuid())
+  eventKey  String   @unique
+  createdAt DateTime @default(now())
+}

@@ -1,0 +1,17 @@
+node_modules/
+**/node_modules/
+**/.env
+**/.env.*
+!**/.env.example
+.git/
+.tools/
+.neon/
+**/*.db
+**/*.db-*
+**/dist/
+test-results/
+playwright-report/
+am.txt
+result.json
+result.jsn
+test.py

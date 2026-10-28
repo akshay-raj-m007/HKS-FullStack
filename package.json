@@ -1,0 +1,48 @@
+{
+  "name": "hks-pickup",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c green,blue \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "setup": "node scripts/setup.mjs && npm run generate -w backend",
+    "migrate": "npm run migrate -w backend",
+    "seed": "npm run seed -w backend",
+    "seed:demo": "npm run seed:demo -w backend",
+    "test": "npm run test --workspaces",
+    "typecheck": "npm run typecheck --workspaces && tsc -p tsconfig.tools.json",
+    "lint": "eslint .",
+    "build": "npm run build --workspaces",
+    "build:vercel": "node scripts/build-vercel.mjs",
+    "neon:generate": "node scripts/neon-run.mjs generate",
+    "neon:migrate": "node scripts/neon-run.mjs migrate",
+    "neon:seed": "node scripts/neon-run.mjs seed",
+    "neon:verify": "node scripts/neon-run.mjs verify",
+    "neon:start": "node scripts/neon-run.mjs start",
+    "check": "npm run lint && npm run typecheck && npm test && npm run build",
+    "format": "prettier --write .",
+    "test:e2e": "playwright test",
+    "test:pages": "playwright test -c playwright.pages.config.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@playwright/test": "^1.56.1",
+    "concurrently": "^9.2.1",
+    "eslint": "^9.39.0",
+    "globals": "^16.4.0",
+    "prettier": "^3.6.2",
+    "prisma": "6.19.3",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.46.0"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.0"
+  },
+  "version": "1.0.0",
+  "dependencies": {
+    "@neon/config": "^1.9.5",
+    "@neon/env": "^1.6.6"
+  }
+}

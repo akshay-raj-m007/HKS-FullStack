@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "cd .. && npm ci",
+  "buildCommand": "cd .. && npm run build:vercel",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://hks-fullstack-api-m007.onrender.com/api/:path*"
+    },
+    { "source": "/:path*", "destination": "/index.html" }
+  ]
+}

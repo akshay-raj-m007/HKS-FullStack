@@ -1,0 +1,43 @@
+{
+  "name": "@hks/backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/src/server.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/test.mjs",
+    "migrate": "prisma migrate deploy",
+    "seed": "tsx prisma/seed.ts",
+    "seed:demo": "tsx prisma/seed-demo.ts",
+    "generate": "prisma generate",
+    "generate:postgres": "prisma generate --schema prisma/postgres/schema.prisma",
+    "migrate:postgres": "prisma migrate deploy --schema prisma/postgres/schema.prisma",
+    "start:cloud": "npm run migrate:postgres && node dist/prisma/seed.js && npm start"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "express": "^5.1.0",
+    "zod": "^3.25.76",
+    "helmet": "^8.1.0",
+    "cors": "^2.8.5",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.2.3",
+    "jsonwebtoken": "^9.0.2",
+    "libphonenumber-js": "^1.12.24",
+    "pino": "^10.1.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.6",
+    "vitest": "^4.1.11",
+    "supertest": "^7.1.4",
+    "@types/supertest": "^6.0.3",
+    "@types/express": "^5.0.5",
+    "@types/cors": "^2.8.19",
+    "@types/cookie-parser": "^1.4.9",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^24.10.0"
+  },
+  "version": "1.0.0"
+}

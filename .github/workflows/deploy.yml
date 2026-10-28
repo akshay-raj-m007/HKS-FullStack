@@ -1,0 +1,75 @@
+name: Deploy GitHub Pages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run generate -w backend
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build -w backend
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+      - name: Build Pages frontend
+        env:
+          VITE_BASE_PATH: ${{ steps.pages.outputs.base_path }}/
+          VITE_ROUTER_MODE: hash
+          VITE_DEMO_MODE: ${{ vars.VITE_DEMO_MODE || 'true' }}
+          VITE_API_URL: ${{ vars.VITE_API_URL || secrets.VITE_API_URL || '/api' }}
+        run: |
+          node --input-type=module -e '
+            if (process.env.VITE_DEMO_MODE !== "true") {
+              const url = new URL(process.env.VITE_API_URL);
+              if (url.protocol !== "https:" || !url.pathname.endsWith("/api")) {
+                throw new Error("API mode requires VITE_API_URL=https://your-api-host/api");
+              }
+            }
+          '
+          npm run build -w frontend
+      - name: Install demo smoke-test browser
+        if: ${{ vars.VITE_DEMO_MODE != 'false' }}
+        run: npx playwright install --with-deps chromium
+      - name: Check built Pages demo
+        if: ${{ vars.VITE_DEMO_MODE != 'false' }}
+        env:
+          VITE_BASE_PATH: ${{ steps.pages.outputs.base_path }}/
+        run: npm run test:pages
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: frontend/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

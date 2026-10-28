@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: hks-fullstack-api-m007
+    runtime: node
+    plan: free
+    region: ohio
+    branch: main
+    buildCommand: npm ci --include=dev && npm run generate:postgres -w backend && npm run build -w backend
+    startCommand: npm run start:cloud -w backend
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: 24.12.0
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PUBLIC_DEMO_MODE
+        value: "true"
+      - key: PAYMENT_PROVIDER
+        value: mock
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_DATABASE_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: OTP_HASH_SECRET
+        generateValue: true
