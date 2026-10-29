@@ -9,6 +9,7 @@ import pino from "pino";
 import { env } from "./config/env.js";
 import { AppError } from "./utils/errors.js";
 import { authenticate } from "./middleware/auth.js";
+import { isAllowedOrigin } from "./security/origin.js";
 import { ConsoleOtpProvider, OtpDeliveryProvider } from "./otp/provider.js";
 import { AuthService } from "./services/auth.js";
 import { PaymentService } from "./services/payments.js";
@@ -73,9 +74,12 @@ export function createApp(
       env.NODE_ENV === "production" ? {} : { strictTransportSecurity: false },
     ),
   );
+  const allowedOrigin = (origin: string) =>
+    isAllowedOrigin(origin, env.FRONTEND_URL, env.NODE_ENV === "development");
   app.use(
     cors({
-      origin: env.FRONTEND_URL,
+      origin: (origin, callback) =>
+        callback(null, !origin || allowedOrigin(origin)),
       credentials: true,
       allowedHeaders: [
         "Content-Type",
@@ -117,7 +121,7 @@ export function createApp(
   );
   app.use((req, _res, next) => {
     const origin = req.get("origin");
-    if (origin && origin !== env.FRONTEND_URL)
+    if (origin && !allowedOrigin(origin))
       return next(
         new AppError(403, "ORIGIN_REJECTED", "Request origin is not allowed."),
       );

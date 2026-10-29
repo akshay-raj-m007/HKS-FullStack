@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 const environment = {
@@ -17,6 +17,15 @@ function run(args) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 if (!existsSync("prisma/test.db")) writeFileSync("prisma/test.db", "");
-run(["../node_modules/prisma/build/index.js", "generate"]);
+// Replacing the loaded native engine fails on Windows while the dev API is running.
+// Reuse the client only when its generated schema exactly matches this profile.
+const generatedSchema = "../node_modules/.prisma/client/schema.prisma";
+if (
+  !existsSync(generatedSchema) ||
+  readFileSync(generatedSchema, "utf8").trim() !==
+    readFileSync("prisma/schema.prisma", "utf8").trim()
+) {
+  run(["../node_modules/prisma/build/index.js", "generate"]);
+}
 run(["../node_modules/prisma/build/index.js", "migrate", "deploy"]);
 run(["../node_modules/vitest/vitest.mjs", "run"]);

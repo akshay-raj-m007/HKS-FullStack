@@ -71,23 +71,55 @@ export class AssistantService {
         .array(addressResult)
         .max(20)
         .parse(await tools.call("list_my_addresses"));
+      // Explicit form selections need no second inference after photo review.
+      // Free-text requests still go through the scoped interpreter.
+      const formSearch =
+        input.message === "Find pickup options for my selected materials." &&
+        input.materials.length > 0;
       const parsed = decisionSchema.safeParse(
-        await this.model.plan(
-          {
-            message: input.message,
-            history: input.history,
-            todayInIndia: indianDay(),
-            categories: allowedCategories,
-            // Never send street address, contact name/phone, credentials or UUIDs.
-            addressLabels: addresses.map(({ label, city, postalCode }) => ({
-              label,
-              city,
-              postalCode,
-            })),
-            confirmedMaterials: input.materials,
-          },
-          signal,
-        ),
+        formSearch
+          ? {
+              intent: "search",
+              materials: input.materials,
+              unsupportedItems: [],
+              addressLabel: null,
+              location: null,
+              date: { kind: "unknown", value: null },
+              after: null,
+              before: null,
+              sort: "earliest",
+              missing: null,
+              screen: null,
+            }
+          : await this.model.plan(
+              {
+                message: input.message,
+                history: input.history,
+                todayInIndia: indianDay(),
+                categories: allowedCategories,
+                // Never send street address, contact name/phone, credentials or UUIDs.
+                addressLabels: addresses.map(({ label, city, postalCode }) => ({
+                  label,
+                  city,
+                  postalCode,
+                })),
+                confirmedMaterials: input.materials,
+                selectedDate: input.date ?? null,
+                selectedLocation: input.location ?? null,
+                selectedAddress: addresses.find(
+                  (address) => address.id === input.addressId,
+                )
+                  ? addresses
+                      .filter((address) => address.id === input.addressId)
+                      .map(({ label, city, postalCode }) => ({
+                        label,
+                        city,
+                        postalCode,
+                      }))[0]
+                  : null,
+              },
+              signal,
+            ),
       );
       if (!parsed.success)
         throw new AppError(

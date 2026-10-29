@@ -20,6 +20,7 @@ import { expireHolds } from "../src/jobs/expiry.js";
 import {
   createAvailability,
   updateAvailability,
+  availability,
 } from "../src/services/providers.js";
 import { RazorpayPaymentProvider } from "../src/payments/razorpay.js";
 const codes = new Map<string, string>();
@@ -948,6 +949,47 @@ describe("complete acceptance flow", () => {
 });
 
 describe("gateway boundary validation", () => {
+  it("does not reuse a mock payment order after switching to Razorpay", async () => {
+    const f = await fixture();
+    const booking = (await hold(f.a, f.input)).body.data;
+    await createPayment(f.a, booking.id);
+    const switched = createApp({ gateway: new RazorpayPaymentProvider() });
+    const response = await request(switched)
+      .post("/api/payments/create")
+      .auth(f.a.token, { type: "bearer" })
+      .send({ bookingId: booking.id });
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe("PAYMENT_PROVIDER_CHANGED");
+    expect(
+      (await db.payment.findUniqueOrThrow({ where: { bookingId: booking.id } }))
+        .provider,
+    ).toBe("mock");
+  });
+
+  it.each(["not JSON", JSON.stringify({ id: "order_incomplete" })])(
+    "reports malformed upstream orders as gateway failures",
+    async (body) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(new Response(body, { status: 200 })),
+      );
+      try {
+        await expect(
+          new RazorpayPaymentProvider().createOrder({
+            amount: 14900,
+            currency: "INR",
+            receipt: randomUUID(),
+          }),
+        ).rejects.toMatchObject({
+          status: 502,
+          code: "PAYMENT_GATEWAY_INVALID_RESPONSE",
+        });
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
   it("rejects a signed payment with a mismatched captured amount", async () => {
     const f = await fixture();
     const booking = (await hold(f.a, f.input)).body.data;
@@ -1014,6 +1056,35 @@ describe("gateway boundary validation", () => {
       });
     } finally {
       vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("availability booking cutoff", () => {
+  it("does not advertise slots too close to start to hold", async () => {
+    const provider = await db.serviceProvider.create({
+      data: {
+        name: "Cutoff " + randomUUID(),
+        description: "Isolated fixture",
+        price: 10000,
+      },
+    });
+    const soon = new Date(Date.now() + env.HOLD_MINUTES * 30000);
+    const later = new Date(Date.now() + (env.HOLD_MINUTES + 90) * 60000);
+    try {
+      await db.providerAvailabilitySlot.createMany({
+        data: [soon, later].map((startAt) => ({
+          providerId: provider.id,
+          startAt,
+          endAt: new Date(startAt.getTime() + 1800000),
+        })),
+      });
+      const slots = await availability(provider.id, {});
+      expect(slots.map((slot) => slot.startAt.toISOString())).toEqual([
+        later.toISOString(),
+      ]);
+    } finally {
+      await db.serviceProvider.delete({ where: { id: provider.id } });
     }
   });
 });

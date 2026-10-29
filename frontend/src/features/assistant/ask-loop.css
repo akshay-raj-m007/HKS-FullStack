@@ -101,3 +101,11 @@
     right: 16px;
   }
 }
+
+.ask-loop .ask-actions button[aria-pressed="true"] {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+.ask-loop .ask-results .ask-warning {
+  margin: 16px 0;
+}

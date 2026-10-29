@@ -110,7 +110,7 @@ export async function seedDatabase(db: PrismaClient) {
         const localDate = new Date(Date.now() + 19800000)
           .toISOString()
           .slice(0, 10);
-        for (let day = 1; day <= 7; day++)
+        for (let day = 0; day <= 14; day++)
           for (const hour of [9 + (index % 2), 13, 16]) {
             const startAt = new Date(
               new Date(localDate + "T00:00:00+05:30").getTime() +
@@ -118,6 +118,19 @@ export async function seedDatabase(db: PrismaClient) {
                 hour * 3600000,
             );
             const endAt = new Date(startAt.getTime() + 3600000);
+            if (startAt.getTime() <= Date.now() + 10 * 60000) continue;
+            // Preserve custom, held and booked intervals, including partial overlaps.
+            if (
+              await tx.providerAvailabilitySlot.findFirst({
+                where: {
+                  providerId: provider.id,
+                  startAt: { lt: endAt },
+                  endAt: { gt: startAt },
+                },
+                select: { id: true },
+              })
+            )
+              continue;
             await tx.providerAvailabilitySlot.upsert({
               where: {
                 providerId_startAt_endAt: {

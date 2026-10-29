@@ -34,6 +34,12 @@ export class PaymentService {
         "HOLD_EXPIRED",
         "This reservation is no longer payable.",
       );
+      assert(
+        !booking.payment || booking.payment.provider === this.gateway.name,
+        409,
+        "PAYMENT_PROVIDER_CHANGED",
+        "This reservation used a different payment provider. Cancel it and create a new pickup.",
+      );
       if (booking.payment?.providerOrderId)
         return { payment: booking.payment, create: false };
       assert(

@@ -55,7 +55,12 @@ AI_ASSISTANT_ENABLED=false
 NVIDIA_API_KEY=
 NVIDIA_CHAT_MODEL=deepseek-ai/deepseek-v4.1-flash
 NVIDIA_VISION_MODEL=deepseek-ai/deepseek-v4.1-flash
+NVIDIA_MODEL_TIMEOUT_MS=8500
 ```
+
+For `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`, the adapter uses a verified endpoint profile: `reasoning_budget=0`, `chat_template_kwargs.enable_thinking=false`, and short final-answer generation. NVIDIA documents a [16,384-token default reasoning budget](https://docs.api.nvidia.com/nim/reference/nvidia-nemotron-3-nano-omni-30b-a3b-reasoning-infer) and [non-thinking controls](https://build.nvidia.com/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning/modelcard). The hosted endpoint returned HTTP 500 in native `json_schema` and `json_object` probes. Its profile therefore sends the output schema and scoped instructions in one text part of a user message, omits `response_format`, and **still requires strict server-side Zod validation**. This is prompted JSON with server enforcement, not native schema-constrained decoding. An exact leading empty `</think>` marker is removed for this model only; reasoning text, prose, invented fields and invalid JSON remain rejected. Other models retain the native-schema request format.
+
+`NVIDIA_MODEL_TIMEOUT_MS` defaults to 8500; valid overrides are 1000–18000 milliseconds. The local Nemotron verification used `15000`. The app's overall 22-second deadline, image limits and retry budget are unchanged. Restart the backend after changing its environment; the smoke command starts a fresh process each run.
 
 The key and chat model must be present for chat capability. Photo additionally requires a vision model. Missing AI settings do not block boot or `/api/health`. All assistant endpoints require authentication:
 
@@ -67,22 +72,22 @@ The key and chat model must be present for chat capability. Photo additionally r
 
 The adapter uses `https://integrate.api.nvidia.com/v1/chat/completions`, `stream:false`, strict `response_format.json_schema`, and inline `image_url` JPEG data. These are candidate endpoint capabilities until the live smoke passes. Official catalog identifiers and request examples were checked against [DeepSeek V4.1 Flash](https://build.nvidia.com/deepseek-ai/deepseek-v4.1-flash), its [NVIDIA API reference](https://docs.api.nvidia.com/nim/reference/nvidia-deepseek-v4_1-flash) and [model card](https://build.nvidia.com/deepseek-ai/deepseek-v4.1-flash/modelcard). Optional candidate [DiffusionGemma 26B A4B IT](https://build.nvidia.com/google/diffusiongemma-26b-a4b-it) uses `google/diffusiongemma-26b-a4b-it`; it is not selected automatically or live-validated. Native tool support and schema reliability vary by endpoint; [NVIDIA NIM release notes](https://docs.nvidia.com/nim/large-language-models/2.1.4/about-nim-llm/release-notes.html) document relevant limitations. Catalog documentation is not proof of live endpoint compatibility. No embedding model is installed.
 
-**Live validation status: blocked by missing NVIDIA credentials.** Deterministic mock tests do not establish model accuracy, account access, NVIDIA retention policy or endpoint feature support. Do not enable production based on mocks.
+**Live validation status: the complete Nemotron Omni smoke passed locally on 2026-10-28.** Chat returned valid Loop intent JSON in approximately 3 seconds; synthetic JPEG vision returned valid observation JSON in approximately 1 second; the optional native function-call probe also passed. Local chat and vision model settings both used `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`, with a 15000 ms attempt limit. Earlier Llama timeouts, malformed output, and Nemotron native-format HTTP 500 responses were observed separately; they are not successful checks. This successful synthetic smoke does not establish waste-recognition accuracy, account-wide reliability or real-photo safety. Production AI has not been enabled by these changes. Run the staged human evaluations before enablement.
 
 ## Limits and failure handling
 
-| Resource      | Limit                                                                                                                                    |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Search input  | 1,000 characters; six history entries of 500 characters; 16 KiB JSON                                                                     |
-| Image         | One JPEG/PNG/WebP, 2 MiB decoded bytes; approximately 2.8 MiB JSON request                                                               |
-| Decoding      | Actual magic bytes + decoded format; still image; 16–8,192 px each side; 8 million pixels; 3-second Sharp processing timeout             |
-| Normalization | Orientation applied; white 768×768 canvas; JPEG re-encode; metadata stripped                                                             |
-| Request       | 22 seconds including body parsing, image work, model and tools; cancellation propagates                                                  |
-| Model         | At most two attempts total per request; 8.5 seconds/attempt; 1,000 output tokens; 64 KiB response envelope; 16,000 content characters    |
-| Retry         | One retry for 429/502/503/504 when Retry-After is at most one second; no auth/schema retries                                             |
-| MCP           | Eight calls; five-second call timeout; five provider cards, three slots/card; oversized eligible catalog (>50) requires narrowing        |
-| Concurrency   | Two operations per process; one per user; no queue                                                                                       |
-| Rate          | Per user: eight searches/minute, three photos/minute; per IP: 20 searches/minute, eight photos/minute; existing API limiter also applies |
+| Resource      | Limit                                                                                                                                                                                                               |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Search input  | 1,000 characters; six history entries of 500 characters; 16 KiB JSON                                                                                                                                                |
+| Image         | One JPEG/PNG/WebP, 2 MiB decoded bytes; approximately 2.8 MiB JSON request                                                                                                                                          |
+| Decoding      | Actual magic bytes + decoded format; still image; 16–8,192 px each side; 8 million pixels; 3-second Sharp processing timeout                                                                                        |
+| Normalization | Orientation applied; white 768×768 canvas; JPEG re-encode; metadata stripped                                                                                                                                        |
+| Request       | 22 seconds including body parsing, image work, model and tools; cancellation propagates                                                                                                                             |
+| Model         | At most two attempts total per request; default 8.5 seconds/attempt (configurable up to 18 seconds within the 22-second request deadline); 1,000 output tokens; 64 KiB response envelope; 16,000 content characters |
+| Retry         | One retry for 429/502/503/504 when Retry-After is at most one second; no auth/schema retries                                                                                                                        |
+| MCP           | Eight calls; five-second call timeout; five provider cards, three slots/card; oversized eligible catalog (>50) requires narrowing                                                                                   |
+| Concurrency   | Two operations per process; one per user; no queue                                                                                                                                                                  |
+| Rate          | Per user: eight searches/minute, three photos/minute; per IP: 20 searches/minute, eight photos/minute; existing API limiter also applies                                                                            |
 
 The process-local limiter/concurrency budget resets on restart and is not shared across replicas. A shared limiter and admission controller are required before horizontal scaling. The ordinary availability service returns at most 100 slots per provider/day, so unusually dense schedules require narrower queries or a future service pagination change. The catalog contains broad material categories, not detailed acceptance policies. Approximate city/postal search follows existing discovery semantics; the booking form still needs an owned, exactly covered address.
 
@@ -108,6 +113,16 @@ Ordinary local access is `http://localhost:5173`. With the default disabled flag
 ```sh
 npm run assistant:smoke -- --live
 ```
+
+The command loads **`backend/.env`**, not `backend/.env.example` or the root Neon `.env.local`. Existing terminal environment variables take precedence over dotenv values. Keep real keys out of the tracked example. The full smoke prints its failing stage, HTTP status when headers arrive, elapsed time, and a safe error hint; it never prints the key, response body or image.
+
+To diagnose the basic NVIDIA vision format independently:
+
+```sh
+npm run assistant:smoke -- --live --basic
+```
+
+This sends a tiny synthetic JPEG using the configured vision model and the same `messages` / `image_url` structure as [NVIDIA's Llama vision example](https://build.nvidia.com/meta/llama-3.2-11b-vision-instruct/deploy). It uses `Accept: application/json`, no system message, no tools and no `response_format`. NVIDIA documents both remote image URLs and inline base64 JPEGs in its [vision API reference](https://docs.api.nvidia.com/nim/reference/meta-llama-3_2-11b-vision-instruct-infer); Loop uses inline normalized images for privacy. The diagnostic allows 60 seconds and does not retry. This longer limit does **not** change the app's 8.5-second model / 22-second request limits. A basic pass is not a release gate: rerun the full smoke without `--basic` to validate the intent and observation JSON schemas. The example alone does not prove native schema or system-message support for the chosen model.
 
 The smoke uses synthetic text and a gray JPEG, never saved customer photos or addresses. It checks strict chat output and image schema response; optionally diagnoses native tool calling. It does **not** prove waste recognition accuracy. Missing credentials produce exit code 2 and zero model requests. A required probe failure exits 1. Keep the flag false until required probes pass.
 
@@ -137,3 +152,17 @@ The existing `frontend/vercel.json` rewrites same-origin `/api/*` to Render. No 
 5. **Immediate rollback:** set `AI_ASSISTANT_ENABLED=false` in Render and restart/redeploy. Search/photo return controlled unavailability; normal bookings need no data repair. Capability refresh hides controls. No database rollback is needed. If reverting code, use a reviewed `git revert <feature-commit>` and the existing gated pipeline, or roll both hosts to the previous verified commit. Never reset or reseed production data to roll back this feature.
 
 Production enablement is intentionally blocked until a real backend key and live verification are available. No paid resources or remote secrets are created by this implementation.
+
+## Photo-to-slot manual regression check
+
+Run `npm run seed` from the root to add remaining slots today and fourteen future days without clearing users or reservations. Run it again whenever availability ages; existing overlapping intervals are preserved. Restart local development with `npm run dev` and open `/ask`.
+
+1. Use a saved Bengaluru address with postal code `560001`, or enter `560001` in the location field.
+2. Upload a paper photo, consent, analyze, and confirm Paper. Choose Tomorrow; leave the message blank and click Find pickup options.
+3. Repeat with kitchen scraps (Food) and garden leaves (Green waste). Bio waste is not a separate category. Review uncertain materials yourself.
+4. Results should include future slots; Review pickup opens the existing booking form, without reserving yet.
+5. Try an uncovered postal code and a date beyond the seeded window: expect an honest empty result, not invented slots. Check the following day performs a fresh query.
+
+Explicit category/location/date selections use the existing read-only database tools directly. Free text still uses the scoped model interpreter. Local seeding does not update the hosted Neon database.
+
+For sample addresses attached to your existing local login, run `npm run seed:local` after signing in once. It adds three fictional addresses per local account and refreshes provider slots. It preserves existing addresses and reservations, is repeatable, and refuses production or any database other than `file:./dev.db`. Choose **Sample Home** (`560001`) and **Tomorrow** in Ask Loop. This command does not populate hosted Neon accounts.

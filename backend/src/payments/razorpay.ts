@@ -3,6 +3,17 @@ import { hmac, safeEqual } from "../utils/crypto.js";
 import { AppError } from "../utils/errors.js";
 import { z } from "zod";
 import type { PaymentProvider } from "./provider.js";
+const invalidResponse = () =>
+  new AppError(
+    502,
+    "PAYMENT_GATEWAY_INVALID_RESPONSE",
+    "Payment gateway returned an unexpected response. Check your order before trying again.",
+  );
+function decode<T>(schema: z.ZodType<T>, data: unknown): T {
+  const parsed = schema.safeParse(data);
+  if (!parsed.success) throw invalidResponse();
+  return parsed.data;
+}
 const orderSchema = z.object({
   id: z.string(),
   amount: z.number().int(),
@@ -48,14 +59,18 @@ export class RazorpayPaymentProvider implements PaymentProvider {
         "PAYMENT_GATEWAY_ERROR",
         "Payment gateway could not complete this request.",
       );
-    return response.json() as Promise<unknown>;
+    try {
+      return (await response.json()) as unknown;
+    } catch {
+      throw invalidResponse();
+    }
   }
   async createOrder(input: {
     amount: number;
     currency: string;
     receipt: string;
   }) {
-    return orderSchema.parse(await this.request("orders", input));
+    return decode(orderSchema, await this.request("orders", input));
   }
   verifySignature(orderId: string, paymentId: string, signature: string) {
     return safeEqual(
@@ -64,7 +79,8 @@ export class RazorpayPaymentProvider implements PaymentProvider {
     );
   }
   async fetchPayment(id: string) {
-    const p = paymentSchema.parse(
+    const p = decode(
+      paymentSchema,
       await this.request("payments/" + encodeURIComponent(id)),
     );
     return {

@@ -165,3 +165,25 @@ test("two-user acceptance flow and responsive UI", async ({
   expect(errors).toEqual([]);
   await otherContext.close();
 });
+
+test("phone login and refresh work on the numeric loopback URL printed by Vite", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    baseURL: "http://127.0.0.1:5174",
+  });
+  try {
+    const page = await context.newPage();
+    await login(page, "+919400009877");
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: "Good things start with a pickup." }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await expect(page.getByLabel("Mobile number")).toBeVisible();
+    await page.reload();
+    await expect(page.getByLabel("Mobile number")).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});

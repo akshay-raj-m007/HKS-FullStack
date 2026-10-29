@@ -49,6 +49,16 @@ export function AskLoopPage() {
   const serial = useRef(0);
   const heading = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const resultsHeading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (result) {
+      resultsHeading.current?.focus({ preventScroll: true });
+      resultsHeading.current?.scrollIntoView?.({
+        behavior: "smooth",
+        block: "start",
+      });
+    }
+  }, [result]);
   const retry = useRef<(() => void) | null>(null);
   useEffect(() => {
     const title = heading.current?.querySelector("h1");
@@ -163,9 +173,9 @@ export function AskLoopPage() {
       },
     );
   }
-  function search() {
+  function search(selectedDate = date) {
     if (!capability.data?.chat || !photoReady || request.current) return;
-    retry.current = search;
+    retry.current = () => search();
     const text =
       message.trim() || "Find pickup options for my selected materials.";
     void run(
@@ -183,7 +193,7 @@ export function AskLoopPage() {
               : location.trim()
                 ? { location: location.trim() }
                 : {}),
-            ...(date ? { date } : {}),
+            ...(selectedDate ? { date: selectedDate } : {}),
             ...(photo && observation
               ? {
                   photoConfirmation: {
@@ -242,6 +252,12 @@ export function AskLoopPage() {
               Messages and approved photos are sent to NVIDIA for analysis. Use
               address labels or city/postal code rather than personal details.
               Photos are processed transiently and are not saved by Loop.
+            </p>
+            <h2>1. What are we picking up?</h2>
+            <p className="input-hint">
+              Upload a photo, or choose materials below. For bio waste, choose
+              Food for kitchen scraps and Garden waste for leaves or garden
+              clippings.
             </p>
             <label htmlFor="ask-photo">
               Waste photo (optional, JPEG/PNG/WebP, up to 2 MiB)
@@ -395,6 +411,12 @@ export function AskLoopPage() {
                 search();
               }}
             >
+              <h2>2. Where and when?</h2>
+              <p className="input-hint">
+                A photo identifies materials. Choose a pickup location and date
+                to see real slots. You can leave the message blank when using
+                these fields.
+              </p>
               <label htmlFor="ask-message">What needs collecting?</label>
               <textarea
                 id="ask-message"
@@ -455,6 +477,38 @@ export function AskLoopPage() {
                   setResult(null);
                 }}
               />
+              <div className="ask-actions" aria-label="Quick pickup dates">
+                {[0, 1, 2].map((offset) => {
+                  const day = localDay(
+                    new Date(Date.now() + offset * 86400000).toISOString(),
+                  );
+                  return (
+                    <button
+                      key={offset}
+                      type="button"
+                      className="button secondary"
+                      disabled={!!busy}
+                      aria-pressed={date === day}
+                      onClick={() => {
+                        setDate(day);
+                        setResult(null);
+                      }}
+                    >
+                      {offset === 0
+                        ? "Today"
+                        : offset === 1
+                          ? "Tomorrow"
+                          : "Day after tomorrow"}
+                    </button>
+                  );
+                })}
+              </div>
+              {!addresses.isPending && !addresses.data?.length && (
+                <p className="input-hint">
+                  No saved address yet. Enter a city or postal code above, or{" "}
+                  <Link to="/addresses">add an address</Link>.
+                </p>
+              )}
               <ErrorMessage error={error} />
               {error != null && (
                 <button
@@ -500,7 +554,9 @@ export function AskLoopPage() {
             aria-label="Assistant results"
             aria-busy={!!busy}
           >
-            <h2>Your pickup options</h2>
+            <h2 ref={resultsHeading} tabIndex={-1}>
+              Your pickup options
+            </h2>
             <div role="status" aria-live="polite">
               {busy ? (
                 <Loading
@@ -519,6 +575,44 @@ export function AskLoopPage() {
                 </p>
               )}
             </div>
+            {observation && !result && !busy && (
+              <div className="ask-warning" role="status">
+                <strong>
+                  {materials.length
+                    ? `You selected: ${materials.map(wasteLabel).join(", ")}.`
+                    : "Choose the materials you want collected."}
+                </strong>
+                <p>
+                  {!photoReady
+                    ? "Review the suggestions and confirm your materials on the form."
+                    : "Materials confirmed. Choose your address or postal code and a date, then find pickup options."}
+                </p>
+              </div>
+            )}
+            {result?.outcome === "no_slots" && result.date && (
+              <button
+                className="button secondary"
+                disabled={!!busy}
+                onClick={() => {
+                  const next = localDay(
+                    new Date(
+                      new Date(result.date! + "T12:00:00+05:30").getTime() +
+                        86400000,
+                    ).toISOString(),
+                  );
+                  setDate(next);
+                  search(next);
+                }}
+              >
+                Check the following day
+              </button>
+            )}
+            {result?.outcome === "no_providers" && (
+              <p className="input-hint">
+                Check the selected address's city and postal code. Providers
+                must accept every selected material and cover that location.
+              </p>
+            )}
             {result?.date && (
               <p>
                 <strong>{dateLabel(result.date + "T12:00:00+05:30")}</strong> ·{" "}

@@ -40,7 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [queryClient]);
   const signIn = (session: Session) => {
-    setAccessToken(session.accessToken);
+    setAccessToken(session.accessToken, session.user.id);
     queryClient.clear();
     setUser(session.user);
   };

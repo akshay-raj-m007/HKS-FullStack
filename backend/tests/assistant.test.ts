@@ -16,6 +16,7 @@ import { db } from "../src/repositories/db.js";
 import { accessToken } from "../src/security/tokens.js";
 import { AssistantService } from "../src/assistant/service.js";
 import { NvidiaModel, SCOPE_REPLY } from "../src/assistant/model.js";
+import { NEMOTRON_OMNI } from "../src/assistant/model-options.js";
 import { connectReadOnlyTools, TOOL_NAMES } from "../src/assistant/mcp.js";
 import {
   normalizeImage,
@@ -70,6 +71,7 @@ const original = {
   NVIDIA_API_KEY: env.NVIDIA_API_KEY,
   NVIDIA_CHAT_MODEL: env.NVIDIA_CHAT_MODEL,
   NVIDIA_VISION_MODEL: env.NVIDIA_VISION_MODEL,
+  NVIDIA_MODEL_TIMEOUT_MS: env.NVIDIA_MODEL_TIMEOUT_MS,
 };
 const search = (body: object = {}, who = user) =>
   request(app)
@@ -189,6 +191,66 @@ afterAll(async () => {
 });
 
 describe("authenticated, bounded Ask Loop API", () => {
+  it.each(["PAPER", "FOOD", "GREEN_WASTE"] as const)(
+    "finds live slots after confirmed %s photo without a second inference",
+    async (material) => {
+      await db.providerWasteType.upsert({
+        where: {
+          providerId_wasteType: { providerId: provider, wasteType: material },
+        },
+        update: {},
+        create: { providerId: provider, wasteType: material },
+      });
+      const observed: Observation = {
+        items: [
+          { label: "Material", category: material, certainty: "suggested" },
+        ],
+        unresolvedItems: [],
+        questions: [],
+      };
+      model.observe.mockResolvedValue(observed);
+      model.plan.mockRejectedValue(
+        new Error("Chat must not gate confirmed form selections"),
+      );
+      const photo = await request(app)
+        .post("/api/assistant/photo")
+        .auth(accessToken(user), { type: "bearer" })
+        .send({ image: image.toString("base64"), consent: true });
+      expect(photo.status).toBe(200);
+      const response = await search({
+        message: "Find pickup options for my selected materials.",
+        materials: [material],
+        addressId: address,
+        date: day,
+        photoConfirmation: {
+          token: photo.body.data.confirmationToken,
+          confirmed: true,
+          acknowledgeUnresolved: false,
+        },
+      });
+      expect(response.status).toBe(200);
+      expect(response.body.data.outcome).toBe("results");
+      expect(
+        response.body.data.providers
+          .flatMap((p: { slots: { id: string }[] }) => p.slots)
+          .map((s: { id: string }) => s.id),
+      ).toContain(slot);
+      expect(model.plan).not.toHaveBeenCalled();
+      expect(
+        await db.providerAvailabilitySlot.findUnique({ where: { id: slot } }),
+      ).toMatchObject({ status: "AVAILABLE" });
+    },
+  );
+  it("asks for missing form details without relying on the model", async () => {
+    const response = await search({
+      message: "Find pickup options for my selected materials.",
+      materials: ["PAPER"],
+    });
+    expect(response.body.data.outcome).toBe("clarification");
+    expect(response.body.data.message).toContain("Where");
+    expect(model.plan).not.toHaveBeenCalled();
+  });
+
   it("requires verified authentication and refuses model-supplied identity", async () => {
     expect((await request(app).get("/api/assistant/capabilities")).status).toBe(
       401,
@@ -765,6 +827,12 @@ describe("transient photo validation and review", () => {
 });
 
 describe("server-only NVIDIA adapter with deterministic transport", () => {
+  const completedText = (content: string) =>
+    new Response(
+      JSON.stringify({
+        choices: [{ finish_reason: "stop", message: { content } }],
+      }),
+    );
   const envelope = (value: unknown) =>
     new Response(
       JSON.stringify({
@@ -795,6 +863,124 @@ describe("server-only NVIDIA adapter with deterministic transport", () => {
       response_format: { type: "json_schema" },
     });
     expect(options!.body).not.toContain(env.NVIDIA_API_KEY);
+    expect(options!.headers).toMatchObject({ Accept: "application/json" });
+    const payload = JSON.parse(options!.body as string);
+    expect(payload.messages[0].role).toBe("system");
+    expect(payload.messages[0].content).toContain(
+      JSON.stringify(payload.response_format.json_schema.schema),
+    );
+    expect(payload.messages[0].content).toContain("without Markdown");
+  });
+  it("gives vision the observation schema explicitly while retaining strict output validation", async () => {
+    const transport = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(envelope(observation));
+    expect(
+      await new NvidiaModel(transport).observe(image, controller().signal),
+    ).toEqual(observation);
+    const payload = JSON.parse(transport.mock.calls[0][1]!.body as string);
+    expect(payload.response_format.json_schema.name).toBe(
+      "loop_photo_observations",
+    );
+    expect(payload.messages[0].content).toContain(
+      JSON.stringify(payload.response_format.json_schema.schema),
+    );
+    expect(
+      payload.response_format.json_schema.schema.properties,
+    ).toHaveProperty("unresolvedItems");
+  });
+  it("bounds Nemotron Omni reasoning so short JSON extraction has a final-answer budget", async () => {
+    env.NVIDIA_CHAT_MODEL = NEMOTRON_OMNI;
+    const transport = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(envelope(baseDecision));
+    await new NvidiaModel(transport).plan(
+      { message: "Paper tomorrow" },
+      controller().signal,
+    );
+    const payload = JSON.parse(transport.mock.calls[0][1]!.body as string);
+    expect(payload).toMatchObject({
+      reasoning_budget: 0,
+      chat_template_kwargs: { enable_thinking: false },
+      temperature: 0.2,
+      max_tokens: 1000,
+    });
+    expect(payload).not.toHaveProperty("response_format");
+    expect(payload.messages).toHaveLength(1);
+    expect(payload.messages[0].role).toBe("user");
+    expect(payload.messages[0].content).toContain('"intent"');
+    expect(payload.messages[0].content).toContain("untrusted");
+    expect(payload).not.toHaveProperty("reasoning_content");
+  });
+  it("accepts only the empty Nemotron closing marker followed by valid schema JSON", async () => {
+    env.NVIDIA_CHAT_MODEL = NEMOTRON_OMNI;
+    const transport = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        completedText("</think>\n" + JSON.stringify(baseDecision)),
+      );
+    expect(
+      await new NvidiaModel(transport).plan({}, controller().signal),
+    ).toEqual(baseDecision);
+    for (const content of [
+      "<think>private reasoning</think>" + JSON.stringify(baseDecision),
+      "Notes: " + JSON.stringify(baseDecision),
+      "</think>\n" + JSON.stringify({ ...baseDecision, providerId: provider }),
+    ]) {
+      await expect(
+        new NvidiaModel(
+          vi.fn<typeof fetch>().mockResolvedValue(completedText(content)),
+        ).plan({}, controller().signal),
+      ).rejects.toMatchObject({ code: "AI_INVALID_OUTPUT" });
+    }
+  });
+  it("preserves native-schema behavior and rejects Nemotron markers on other models", async () => {
+    const transport = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        completedText("</think>\n" + JSON.stringify(baseDecision)),
+      );
+    await expect(
+      new NvidiaModel(transport).plan({}, controller().signal),
+    ).rejects.toMatchObject({ code: "AI_INVALID_OUTPUT" });
+    expect(
+      JSON.parse(transport.mock.calls[0][1]!.body as string),
+    ).toHaveProperty("response_format.json_schema");
+  });
+  it("sends one schema-bearing text part and the inline photo for Nemotron vision", async () => {
+    env.NVIDIA_VISION_MODEL = NEMOTRON_OMNI;
+    const transport = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        completedText("</think>\n" + JSON.stringify(observation)),
+      );
+    expect(
+      await new NvidiaModel(transport).observe(image, controller().signal),
+    ).toEqual(observation);
+    const payload = JSON.parse(transport.mock.calls[0][1]!.body as string);
+    expect(payload.messages).toHaveLength(1);
+    expect(payload.messages[0].role).toBe("user");
+    expect(payload.messages[0].content).toHaveLength(2);
+    expect(payload.messages[0].content[0]).toMatchObject({ type: "text" });
+    expect(payload.messages[0].content[0].text).toContain('"unresolvedItems"');
+    expect(payload.messages[0].content[1].image_url.url).toMatch(
+      /^data:image\/jpeg;base64,/,
+    );
+  });
+  it("uses the configured attempt limit while still honoring caller cancellation", async () => {
+    const previous = env.NVIDIA_MODEL_TIMEOUT_MS;
+    env.NVIDIA_MODEL_TIMEOUT_MS = 15000;
+    const timer = vi.spyOn(AbortSignal, "timeout");
+    try {
+      const transport = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(envelope(baseDecision));
+      await new NvidiaModel(transport).plan({}, controller().signal);
+      expect(timer).toHaveBeenCalledWith(15000);
+    } finally {
+      env.NVIDIA_MODEL_TIMEOUT_MS = previous;
+      timer.mockRestore();
+    }
   });
   it.each([401, 403, 429, 503])(
     "sanitizes upstream %s and bounds retries",

@@ -50,21 +50,42 @@ try {
   await page.getByRole("link", { name: "Ask Loop", exact: true }).click();
   const capability = await capabilityResponse;
   assert.equal(capability.status(), 200);
-  assert.equal((await capability.json()).data.enabled, false);
+  const assistant = (await capability.json()).data;
   await visible(page.getByRole("heading", { name: "Ask Loop", exact: true }));
-  await visible(
-    page.getByText("Ask Loop is currently unavailable.", { exact: true }),
-  );
-  assert.equal(await page.getByLabel("What needs collecting?").count(), 0);
+  if (assistant.enabled) {
+    await visible(page.getByLabel("What needs collecting?"));
+    await page
+      .getByLabel("Saved pickup address (optional)")
+      .selectOption({ index: 1 });
+    await page.getByRole("checkbox", { name: "Paper", exact: true }).check();
+    await page.getByRole("button", { name: "Tomorrow", exact: true }).click();
+    const search = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/assistant/search",
+    );
+    await page.getByRole("button", { name: "Find pickup options" }).click();
+    const response = await search;
+    assert.equal(response.status(), 200);
+    const result = (await response.json()).data;
+    assert.equal(result.outcome, "results");
+    assert(result.providers.some((provider) => provider.slots.length > 0));
+    console.log(
+      "PASS: enabled hosted Ask Loop finds real future paper slots for the guest address",
+    );
+  } else {
+    await visible(
+      page.getByText("Ask Loop is currently unavailable.", { exact: true }),
+    );
+    assert.equal(await page.getByLabel("What needs collecting?").count(), 0);
+    console.log("PASS: hosted Ask Loop capability-disabled fallback");
+  }
   await page
     .getByRole("link", { name: "Use manual collection search" })
     .click();
   await visible(
     page.getByRole("heading", { name: "Good things start with a pickup." }),
   );
-  console.log(
-    "PASS: hosted Ask Loop capability-disabled fallback and manual discovery navigation",
-  );
+  console.log("PASS: hosted Ask Loop returns to manual discovery");
   await page
     .locator("article")
     .filter({

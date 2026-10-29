@@ -44,6 +44,32 @@ api.stdout.on("data", (chunk) => {
   process.stdout.write(chunk);
 });
 api.stderr.on("data", (chunk) => process.stderr.write(chunk));
+// Vite can start before the API finishes loading. Do not let Playwright's
+// frontend readiness probe race the first authentication request.
+const readinessDeadline = Date.now() + 120000;
+let apiReady = false;
+while (Date.now() < readinessDeadline && api.exitCode === null) {
+  try {
+    const health = await fetch("http://127.0.0.1:4001/api/health", {
+      signal: AbortSignal.timeout(2000),
+    });
+    const result = await health.json();
+    if (health.ok && result.data?.status === "ok") {
+      apiReady = true;
+      break;
+    }
+  } catch {
+    /* API is still starting; keep the frontend readiness gate closed. */
+  }
+  await new Promise((resolve) => setTimeout(resolve, 250));
+}
+if (!apiReady) {
+  api.kill();
+  log.end();
+  throw new Error(
+    "Isolated E2E API did not become healthy before the startup deadline.",
+  );
+}
 const frontend = spawn(
   process.execPath,
   [

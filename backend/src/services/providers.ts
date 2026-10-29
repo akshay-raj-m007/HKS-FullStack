@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { env } from "../config/env.js";
 import { z } from "zod";
 import { db, transaction } from "../repositories/db.js";
 import { filterSchema, dateRange } from "../validators/schemas.js";
@@ -85,14 +86,16 @@ export async function availability(
     if (!areas.some((area) => servesLocation(area, filters.location!)))
       return [];
   }
+  // Match holdBooking: a full payment hold must fit before collection starts.
+  const earliestStart = new Date(Date.now() + env.HOLD_MINUTES * 60000);
   const slots = await db.providerAvailabilitySlot.findMany({
     where: {
       providerId,
       provider: { active: true },
       status: "AVAILABLE",
       startAt: filters.date
-        ? { ...dateRange(filters.date), gt: new Date() }
-        : { gt: new Date() },
+        ? { ...dateRange(filters.date), gt: earliestStart }
+        : { gt: earliestStart },
     },
     orderBy: { startAt: "asc" },
     take: 100,

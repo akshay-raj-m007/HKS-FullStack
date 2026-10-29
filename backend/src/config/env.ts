@@ -29,6 +29,12 @@ const schema = z.object({
   NVIDIA_API_KEY: z.string().default(""),
   NVIDIA_CHAT_MODEL: z.string().max(150).default(""),
   NVIDIA_VISION_MODEL: z.string().max(150).default(""),
+  NVIDIA_MODEL_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .min(1000)
+    .max(18000)
+    .default(8500),
 });
 export const env = schema.parse(process.env);
 if (

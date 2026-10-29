@@ -132,7 +132,9 @@ Frontend: **http://localhost:5173** · API: **http://localhost:4000/api**
 
 `npm run setup` creates ignored environment files with independent random secrets and generates the SQLite Prisma client. It preserves existing environment files.
 
-For local OTP login, enter a valid mobile number, read its random `[DEV OTP]` code in the API terminal, and verify it within five minutes. There is no universal login code. Coverage includes Bengaluru `560001`, `560034`, `560038` and Mysuru `570001`, depending on the provider.
+Run `npm run dev` once in your own terminal and keep that terminal open. The launcher checks both ports before starting and stops the other service if either service exits. If a port is occupied, stop the earlier dev run with Ctrl+C before trying again. It does not automatically kill other applications or switch frontend ports.
+
+For local OTP login, open http://127.0.0.1:5173, enter a valid mobile number, read its random `[api] [DEV OTP]` code in that same terminal, and verify it within five minutes. Local login does not send SMS. There is no universal login code. Coverage includes Bengaluru `560001`, `560034`, `560038` and Mysuru `570001`, depending on the provider.
 
 ### Database Seeding
 
@@ -141,7 +143,7 @@ npm run seed
 npm run seed:demo
 ```
 
-- `seed` additively upserts five providers, supported waste types, service areas, and availability for the next seven Indian calendar days. It preserves bookings; rerun it as the demo ages.
+- `seed` additively upserts five providers, supported waste types, service areas, and availability for the remaining slots today and the next fourteen Indian calendar days. It preserves bookings; rerun it as the demo ages.
 - `seed:demo` additionally inserts four synthetic accounts and addresses, six bookings, and payment/waste records across sample states. It replaces only its deterministic fixture IDs and prints per-table insertion counts. Its intentionally invalid account phone numbers cannot be used for OTP sign-in.
 
 The default local database is `backend/prisma/dev.db` and is excluded from Git. Keep `.env` files, local databases, and signing/payment secrets private.

@@ -6,7 +6,7 @@
     "frontend"
   ],
   "scripts": {
-    "dev": "concurrently -n api,web -c green,blue \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "dev": "node scripts/dev.mjs",
     "setup": "node scripts/setup.mjs && npm run generate -w backend",
     "migrate": "npm run migrate -w backend",
     "seed": "npm run seed -w backend",
@@ -26,7 +26,9 @@
     "check": "npm run lint && npm run typecheck && npm test && npm run build",
     "format": "prettier --write .",
     "test:e2e": "playwright test",
-    "test:pages": "playwright test -c playwright.pages.config.ts"
+    "test:pages": "playwright test -c playwright.pages.config.ts",
+    "seed:local": "npm run seed:local -w backend",
+    "payments:webhook": "node scripts/webhook-tunnel.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

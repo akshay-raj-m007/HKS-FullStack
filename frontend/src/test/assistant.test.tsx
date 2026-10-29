@@ -118,6 +118,33 @@ const submit = () =>
   screen.getByRole("button", { name: "Find pickup options" });
 
 describe("Ask Loop review, grounded search and existing checkout", () => {
+  it("rechecks the following day after empty availability using the new date", async () => {
+    const fallback = vi.mocked(api).getMockImplementation()!;
+    let searches = 0;
+    vi.mocked(api).mockImplementation(async (path, options) =>
+      path === "/assistant/search" && ++searches === 1
+        ? {
+            ...results,
+            providers: [],
+            outcome: "no_slots",
+            message: "No live slots match that date.",
+          }
+        : fallback(path, options),
+    );
+    const user = userEvent.setup();
+    mount();
+    await user.click(await screen.findByRole("checkbox", { name: "Paper" }));
+    await user.click(submit());
+    await user.click(
+      await screen.findByRole("button", { name: "Check the following day" }),
+    );
+    await screen.findByRole("link", { name: /^Review pickup:/ });
+    const calls = vi
+      .mocked(api)
+      .mock.calls.filter(([path]) => path === "/assistant/search");
+    expect(JSON.parse(calls[1][1]!.body as string).date).toBe("2035-10-02");
+  });
+
   it("runs photo → editable suggestions → explicit confirmation → live cards → ordinary booking", async () => {
     const user = userEvent.setup();
     mount();
@@ -152,6 +179,11 @@ describe("Ask Loop review, grounded search and existing checkout", () => {
     await user.click(
       screen.getByRole("checkbox", { name: /I understand unresolved items/ }),
     );
+    await user.selectOptions(
+      screen.getByLabelText("Saved pickup address (optional)"),
+      address.id,
+    );
+    await user.click(screen.getByRole("button", { name: "Tomorrow" }));
     await user.click(submit());
     const card = await screen.findByRole("link", { name: /^Review pickup:/ });
     const searchCall = vi
@@ -159,6 +191,9 @@ describe("Ask Loop review, grounded search and existing checkout", () => {
       .mock.calls.find(([path]) => path === "/assistant/search")!;
     expect(JSON.parse(searchCall[1]!.body as string)).toMatchObject({
       materials: ["PAPER", "PLASTIC"],
+      addressId: address.id,
+      date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      message: "Find pickup options for my selected materials.",
       photoConfirmation: {
         token: "signed-photo-review",
         confirmed: true,
