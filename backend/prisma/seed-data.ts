@@ -31,6 +31,7 @@ export async function seedDatabase(db: PrismaClient) {
       areas: [
         { city: "Bengaluru", postalCode: "560001" },
         { city: "Bengaluru", postalCode: "560034" },
+        { city: "Bengaluru", postalCode: "560038" },
       ],
     },
     {
@@ -63,6 +64,7 @@ export async function seedDatabase(db: PrismaClient) {
       areas: [
         { city: "Bengaluru", postalCode: "560001" },
         { city: "Bengaluru", postalCode: "560034" },
+        { city: "Bengaluru", postalCode: "560038" },
         { city: "Mysuru", postalCode: "570001" },
       ],
     },

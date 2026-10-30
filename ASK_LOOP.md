@@ -1,5 +1,13 @@
 # Ask Loop: implementation and operations
 
+## Hosted demo
+
+Open https://hks-fullstack.vercel.app, choose **Open interactive demo**, then **Ask Loop** (or visit `/ask` after signing in). The Render backend is configured with the NVIDIA settings and the feature flag enabled; credentials remain backend-only. Hosted payments remain mock payments.
+
+For a quick check, select **Home**, **Tomorrow**, and **Paper**, **Food waste**, or **Garden waste**, then choose **Find pickup options**. The seed includes food and mixed-waste coverage for the guest Home postcode `560038`; redeploying refreshes future slots without clearing bookings. Photo analysis requires consent, material review, and confirmation before searching. The model can return temporary upstream errors or invalid output; use **Retry last request** or select materials directly. Strict server-side output validation remains enabled.
+
+Deployment verification exercised live NVIDIA chat, a synthetic JPEG upload, photo confirmation to database slots, booking handoff, Back/reload, and mobile layout. The synthetic image checks the integration, not real-material classification accuracy. `npm run cloud:verify` checks the enabled assistant's three material searches as well as ordinary hosted session and mock-booking behavior; it also supports deployments where AI is disabled.
+
 Ask Loop adds a read-only waste-photo review and conversational pickup search at `/ask`. It is **disabled by default**. Discovery, authentication, holds, checkout and payments work without NVIDIA credentials. This remains a sandbox: no real pickup dispatch or money movement.
 
 ## User flow

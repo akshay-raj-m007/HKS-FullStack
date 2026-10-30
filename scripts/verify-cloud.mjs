@@ -57,21 +57,32 @@ try {
     await page
       .getByLabel("Saved pickup address (optional)")
       .selectOption({ index: 1 });
-    await page.getByRole("checkbox", { name: "Paper", exact: true }).check();
     await page.getByRole("button", { name: "Tomorrow", exact: true }).click();
-    const search = page.waitForResponse(
-      (response) =>
-        new URL(response.url()).pathname === "/api/assistant/search",
-    );
-    await page.getByRole("button", { name: "Find pickup options" }).click();
-    const response = await search;
-    assert.equal(response.status(), 200);
-    const result = (await response.json()).data;
-    assert.equal(result.outcome, "results");
-    assert(result.providers.some((provider) => provider.slots.length > 0));
-    console.log(
-      "PASS: enabled hosted Ask Loop finds real future paper slots for the guest address",
-    );
+    for (const material of ["Paper", "Food waste", "Garden waste"]) {
+      const checkbox = page.getByRole("checkbox", {
+        name: material,
+        exact: true,
+      });
+      await checkbox.check();
+      const search = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/assistant/search",
+      );
+      await page.getByRole("button", { name: "Find pickup options" }).click();
+      const response = await search;
+      assert.equal(response.status(), 200);
+      const result = (await response.json()).data;
+      assert.equal(
+        result.outcome,
+        "results",
+        material + " at the guest address",
+      );
+      assert(result.providers.some((provider) => provider.slots.length > 0));
+      await checkbox.uncheck();
+      console.log(
+        `PASS: hosted Ask Loop finds future ${material} slots for the guest address`,
+      );
+    }
   } else {
     await visible(
       page.getByText("Ask Loop is currently unavailable.", { exact: true }),
